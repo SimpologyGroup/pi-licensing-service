@@ -3,6 +3,7 @@ from datetime import timedelta
 from django import forms
 from django.conf import settings
 from django.contrib import admin
+from django.http import HttpResponse
 from django.utils import timezone
 
 from . import services
@@ -104,7 +105,7 @@ class LicenseAdmin(admin.ModelAdmin):
     search_fields = ["lid", "customer__email", "provider_subscription_id"]
     readonly_fields = ["lid", "created", "updated"]
     inlines = [CertificateInline, ActivationInline]
-    actions = ["expire_now", "revoke", "reactivate", "extend_year"]
+    actions = ["download_certificate", "expire_now", "revoke", "reactivate", "extend_year"]
 
     def get_form(self, request, obj=None, **kwargs):
         if obj is None:
@@ -124,6 +125,16 @@ class LicenseAdmin(admin.ModelAdmin):
 
     def get_inlines(self, request, obj):
         return self.inlines if obj else []
+
+    @admin.action(description="Download certificate (.pilic), to test uploading it in an app")
+    def download_certificate(self, request, queryset):
+        if queryset.count() != 1:
+            self.message_user(request, "Choose one licence to download its certificate.", level="warning")
+            return None
+        license_ = services.refresh(queryset.get())
+        response = HttpResponse(services.describe(license_)["certificate"], content_type="application/x-pi-license")
+        response["Content-Disposition"] = f'attachment; filename="{license_.product.code}-{license_.lid}.pilic"'
+        return response
 
     @admin.action(description="Expire now (customer drops to the free tier)")
     def expire_now(self, request, queryset):

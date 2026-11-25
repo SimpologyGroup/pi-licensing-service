@@ -283,6 +283,13 @@ class TestScreenTests(LicensingTestCase):
         r = self.get("account_license", self.safety_key, email="p@co.za")
         self.assertEqual(r.json()["license"]["plan"], "safety-t1")
 
+    def test_download_certificate_action(self):
+        lic = self.paid_license("p@co.za", "safety-t2")
+        r = self.client.post(reverse("admin:licensing_license_changelist"),
+                             {"action": "download_certificate", "_selected_action": [lic.pk]})
+        self.assertIn(".pilic", r["Content-Disposition"])
+        self.assertEqual(verify(r.content.decode(), self.public_keys()).plan, "safety-t2")
+
     def test_revoke_and_reactivate(self):
         lic = self.paid_license("p@co.za", "cashflow-t4")
         url = reverse("admin:licensing_license_changelist")
