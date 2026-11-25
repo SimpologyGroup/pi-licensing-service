@@ -248,3 +248,54 @@ class KeyRotationTests(LicensingTestCase):
 
 def tearDownModule():
     shutil.rmtree(KEY_DIR, ignore_errors=True)
+
+
+class TestScreenTests(LicensingTestCase):
+    """Issuing licences by hand in the admin, with no payment."""
+
+    def setUp(self):
+        super().setUp()
+        from django.contrib.auth.models import User
+
+        self.staff = User.objects.create_superuser("admin", "admin@x.co", "pw-long-enough")
+        self.client.force_login(self.staff)
+
+    def test_issue_paid_licence_without_payment(self):
+        tier = Tier.objects.get(code="safety-t3")
+        r = self.client.post(reverse("admin:licensing_license_add"),
+                             {"email": "Test@Acme.co", "org": "Acme", "tier": tier.pk, "status": "active", "months": 12})
+        self.assertEqual(r.status_code, 302, r.content[:2000])
+        license_ = License.objects.get(customer__email="test@acme.co")
+        self.assertEqual(license_.tier, tier)
+        self.assertEqual(license_.provider, "manual")
+        r = self.get("account_license", self.safety_key, email="test@acme.co")
+        self.assertEqual(r.json()["license"]["plan"], "safety-t3")
+
+    def test_add_page_shows(self):
+        self.assertEqual(self.client.get(reverse("admin:licensing_license_add")).status_code, 200)
+        lic = self.paid_license("p@co.za", "safety-t2")
+        self.assertEqual(self.client.get(reverse("admin:licensing_license_change", args=[lic.pk])).status_code, 200)
+
+    def test_expire_action_drops_to_free(self):
+        lic = self.paid_license("p@co.za", "safety-t2")
+        self.client.post(reverse("admin:licensing_license_changelist"),
+                         {"action": "expire_now", "_selected_action": [lic.pk]})
+        r = self.get("account_license", self.safety_key, email="p@co.za")
+        self.assertEqual(r.json()["license"]["plan"], "safety-t1")
+
+    def test_download_certificate_action(self):
+        lic = self.paid_license("p@co.za", "safety-t2")
+        r = self.client.post(reverse("admin:licensing_license_changelist"),
+                             {"action": "download_certificate", "_selected_action": [lic.pk]})
+        self.assertIn(".pilic", r["Content-Disposition"])
+        self.assertEqual(verify(r.content.decode(), self.public_keys()).plan, "safety-t2")
+
+    def test_revoke_and_reactivate(self):
+        lic = self.paid_license("p@co.za", "cashflow-t4")
+        url = reverse("admin:licensing_license_changelist")
+        self.client.post(url, {"action": "revoke", "_selected_action": [lic.pk]})
+        self.assertEqual(self.get("account_license", self.cashflow_key, email="p@co.za").json()["license"]["plan"],
+                         "cashflow-t1")
+        self.client.post(url, {"action": "reactivate", "_selected_action": [lic.pk]})
+        self.assertEqual(self.get("account_license", self.cashflow_key, email="p@co.za").json()["license"]["plan"],
+                         "cashflow-t4")
