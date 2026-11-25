@@ -1,0 +1,16 @@
+from django.contrib import admin
+from django.urls import path
+
+from licensing import views
+
+admin.site.site_header = admin.site.site_title = "PI - Licensing Service"
+
+urlpatterns = [
+    path(".well-known/pi-license-keys", views.public_keys, name="public_keys"),
+    path("v1/accounts/licenses", views.account_license, name="account_license"),
+    path("v1/free-licenses", views.free_license, name="free_license"),
+    path("v1/licenses/<str:lid>/status", views.license_status, name="license_status"),
+    path("v1/licenses/<str:lid>/certificate", views.license_certificate, name="license_certificate"),
+    path("v1/activations", views.activation, name="activation"),
+    path("admin/", admin.site.urls),
+]
