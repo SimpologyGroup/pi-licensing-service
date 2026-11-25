@@ -17,6 +17,9 @@ from . import keystore
 from .models import Activation, Certificate, Customer, License, Product, Tier
 
 
+MANUAL_PROVIDER = "manual"  # issued by hand in the admin, no payment
+
+
 class NotFound(Exception):
     pass
 
