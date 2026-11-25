@@ -1,0 +1,17 @@
+# local settings and secrets
+.env
+keys/
+*.pem
+
+# Python environment and generated files
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+staticfiles/
+dev.sqlite3
+
+# runtime output
+logs/
+backups/
+.DS_Store
