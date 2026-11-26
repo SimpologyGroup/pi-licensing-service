@@ -10,4 +10,7 @@ requires-python = ">=3.11"
 dependencies = ["cryptography>=43"]
 
 [tool.setuptools]
+# src layout: an editable install then adds package/src to the path, so a stray pi_license folder elsewhere
+# (left by an old install or a sync tool) cannot hide the real package.
+package-dir = {"" = "src"}
 packages = ["pi_license"]

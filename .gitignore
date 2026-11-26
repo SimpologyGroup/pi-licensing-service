@@ -4,7 +4,9 @@ keys/
 *.pem
 
 # Python environment and generated files
-.venv/
+.venv
+.venv.nosync/
+build/
 __pycache__/
 *.pyc
 *.egg-info/

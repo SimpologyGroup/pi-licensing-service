@@ -15,10 +15,12 @@ Design: [PI Licensing Service: Design v1](https://claude.ai/artifact/VJAm4jcwHu1
 
 ## First run (Mac)
 
+Needs Python 3.11 or newer. The Mac's own `python3` is 3.9, so install Homebrew's first: `brew install python@3.12`.
+
 ```
 cp .env.example .env            # fill in DJANGO_SECRET_KEY and the database
 createdb pi_licensing
-python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+./start.sh --install                                   # makes .venv with Python 3.11+ and a current pip, then stops
 .venv/bin/python manage.py generate_signing_key        # prints the kid: put it in .env as SIGNING_KID
 .venv/bin/python manage.py migrate
 .venv/bin/python manage.py createsuperuser
@@ -27,6 +29,13 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/python manage.py create_api_key "Website"
 ./start.sh                                             # http://localhost:8002/admin/
 ```
+
+Folders with spaces in their names are fine. If the clone is in Desktop or Documents and iCloud syncs them, the venv
+lives in `.venv.nosync` (iCloud leaves it alone) and `.venv` points to it; `start.sh` sets this up. The `keys/`
+folder is synced too, so for the live service keep the clone outside iCloud.
+
+If `manage.py` says `No module named 'pi_license'` or `cannot import name ... (unknown location)`, the venv is
+damaged. Make a new one: `rm -rf .venv .venv.nosync && ./start.sh --install`.
 
 Keep a copy of the key file in `keys/` somewhere safe: without it no new certificates can be signed, and with it
 anyone can sign them.
@@ -48,7 +57,7 @@ All calls except the public keys need `Authorization: Bearer <api key>`. App key
 
 ```
 .venv/bin/python manage.py test licensing
-cd package && ../.venv/bin/python -m unittest discover -s tests
+cd package && ../.venv/bin/python -m unittest discover -s tests   # tests the installed package/src/pi_license
 ```
 
 ## Not built yet

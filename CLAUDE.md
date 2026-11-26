@@ -8,14 +8,15 @@ Owner: Johann Kruger (Simpology). Design: https://claude.ai/artifact/VJAm4jcwHu1
 - Django 5.2, PostgreSQL 16, waitress + whitenoise, same conventions as the two apps (`.env`, `start.sh`).
   No django-tenants: this service has one shared database `pi_licensing`.
 - Port **8002** (Cash Flow 8000, Safety Compliance 8001).
-- Python: always `.venv/bin/python manage.py ...`. Tests: `manage.py test licensing` and the package tests
+- Python 3.11+: always `.venv/bin/python manage.py ...`; `./start.sh --install` makes the venv (on macOS in
+  `.venv.nosync`, so iCloud leaves it alone). Tests: `manage.py test licensing` and the package tests
   (`cd package && python -m unittest discover -s tests`); all must pass before a commit.
   `DB_ENGINE=sqlite` runs them without PostgreSQL for a quick check only.
 
 ## Rules
 
-- `package/pi_license` is installed by both apps: keep it dependency-light (cryptography only, standard library
-  for HTTP) and backwards compatible. Certificate format changes bump `SCHEMA_VERSION`.
+- `package/src/pi_license` (src layout, so a stray `pi_license` folder can't hide it) is installed by both apps:
+  keep it dependency-light (cryptography only, standard library for HTTP) and backwards compatible. Certificate format changes bump `SCHEMA_VERSION`.
 - Products and tiers are data (`Product`, `Tier`), never code. The agreed tiers are in `licensing/catalogue.py`,
   loaded by migration 0002; later changes are made in the admin or by a new data migration.
 - Limits are a plain name → number map (`null` = unlimited). Safety Compliance counts clients + business units +
