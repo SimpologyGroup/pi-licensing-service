@@ -47,9 +47,9 @@ All calls except the public keys need `Authorization: Bearer <api key>`. App key
 | Call | Who | What |
 | --- | --- | --- |
 | `GET /.well-known/pi-license-keys` | anyone | Public keys (JWKS) for checking certificates |
-| `GET /v1/accounts/licenses?email=&product=&account=` | app backend | Licence to use for a verified email and account (ties it to the account); free Tier 1 is issued when there is none |
+| `GET /v1/accounts/licenses?email=&product=&account=&org_id=` | app backend | Licence to use for a verified email and account (ties it to the account); free Tier 1 is issued when there is none |
 | `GET /v1/licenses?email=&product=&account=` | app backend | The email's licences to pick from, each marked free to use, used by this account (`this`) or another (`other`); no certificates |
-| `POST /v1/free-licenses` `{email, product, name, org, account}` | website, app | Free Tier 1 licence at sign-up; with `account`, that app account's own free licence, tied to it (an account with no licence falls back to it) |
+| `POST /v1/free-licenses` `{email, product, name, org, org_id, account}` | website, app | Free Tier 1 licence at sign-up; with `account`, that app account's own free licence, tied to it (an account with no licence falls back to it) |
 | `GET /v1/licenses/<lid>/status` | app backend | Status; `current` is the licence now in use |
 | `GET /v1/licenses/<lid>/certificate` | app, website | The `.pilic` file |
 | `POST /v1/activations` `{lid, account}` | app backend | Tie a licence to an app account; `409 in_use` when another account has it |
@@ -59,6 +59,13 @@ key) that links or uploads it; its certificate then names that account (`account
 (`installation`, the middle part of the app key) and the apps refuse it anywhere else. One email can hold several
 licences (one per account); each account also gets its own free licence. To move a licence to another account,
 open it in the admin and delete the line under "account using this licence".
+
+**Organisations.** Every organisation has an **Org ID** (ORG-00001, ORG-00002 ...), given by this service when it is
+first saved and the same for every PI app: an organisation's Cash Flow and Safety licences hang off the same Org ID.
+It can never be changed, and organisations are never deleted (only renamed). Customers (emails) belong to an
+organisation; a new customer from the API joins the organisation given by `org_id`, or a new one named `org`.
+Certificates carry `org` (the name) and `org_id`. In the admin, Organisations lists them; a licence issued by hand
+is for a customer picked from the list (add a new customer with the + next to it).
 
 ## Tests
 

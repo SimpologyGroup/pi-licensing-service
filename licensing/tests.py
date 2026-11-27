@@ -10,7 +10,7 @@ from django.utils import timezone
 from pi_license import LicenseError, keys, verify
 
 from . import keystore, services
-from .models import Activation, AppClient, Certificate, Customer, License, Product, Tier
+from .models import Activation, AppClient, Certificate, Customer, License, Organisation, Product, Tier
 
 KEY_DIR = Path(tempfile.mkdtemp(prefix="pi-lic-keys-"))
 (KEY_DIR / "test-1.pem").write_bytes(keys.private_pem(keys.generate()))
@@ -91,6 +91,7 @@ class FreeTierTests(LicensingTestCase):
         lic = verify(data["certificate"], self.public_keys(), product="pi-safety")
         self.assertEqual(lic.email, "jane@acme.co")
         self.assertEqual(lic.org, "Acme")
+        self.assertRegex(lic.org_id, r"^ORG-\d{5}$")
         self.assertEqual(lic.limits, {"org_units": 5, "resources": 10})
         self.assertEqual(lic.subscription["provider"], "free")
 
@@ -262,14 +263,51 @@ class TestScreenTests(LicensingTestCase):
 
     def test_issue_paid_licence_without_payment(self):
         tier = Tier.objects.get(code="safety-t3")
+        customer = services.get_or_create_customer("Test@Acme.co", org="Acme")
         r = self.client.post(reverse("admin:licensing_license_add"),
-                             {"email": "Test@Acme.co", "org": "Acme", "tier": tier.pk, "status": "active", "months": 12})
+                             {"customer": customer.pk, "tier": tier.pk, "status": "active", "months": 12})
         self.assertEqual(r.status_code, 302, r.content[:2000])
         license_ = License.objects.get(customer__email="test@acme.co")
         self.assertEqual(license_.tier, tier)
         self.assertEqual(license_.provider, "manual")
         r = self.get("account_license", self.safety_key, email="test@acme.co")
         self.assertEqual(r.json()["license"]["plan"], "safety-t3")
+
+    def test_add_page_picks_a_customer(self):
+        page = self.client.get(reverse("admin:licensing_license_add")).content.decode()
+        self.assertIn('name="customer"', page)
+        self.assertNotIn('name="email"', page)
+
+    def test_org_id_is_given_once_and_never_changes(self):
+        org = Organisation.objects.create(name="Acme")
+        self.assertRegex(org.org_id, r"^ORG-\d{5}$")
+        org.name = "Acme Mining"
+        org.save()   # the name may change
+        org.org_id = "ORG-99999"
+        with self.assertRaises(ValueError):
+            org.save()
+        with self.assertRaises(ValueError):
+            org.delete()
+        second = Organisation.objects.create(name="Acme")   # same name, its own ID
+        self.assertNotEqual(second.org_id, Organisation.objects.get(pk=org.pk).org_id)
+        page = self.client.get(reverse("admin:licensing_organisation_change", args=[org.pk])).content.decode()
+        self.assertNotIn('name="org_id"', page)
+        self.assertEqual(self.client.get(reverse("admin:licensing_organisation_delete", args=[org.pk])).status_code,
+                         403)
+
+    def test_one_organisation_for_both_apps(self):
+        org = Organisation.objects.create(name="Acme")
+        a = services.get_or_create_customer("boss@acme.co", org_id=org.org_id.lower())
+        b = services.get_or_create_customer("finance@acme.co", org_id=org.org_id)
+        self.assertEqual(a.organisation, org)
+        self.assertEqual(b.organisation, org)
+        safety = self.get("account_license", self.safety_key, email="boss@acme.co").json()["license"]
+        cashflow = self.get("account_license", self.cashflow_key, email="finance@acme.co").json()["license"]
+        self.assertEqual(safety["org_id"], org.org_id)
+        self.assertEqual(cashflow["org_id"], org.org_id)
+        self.assertEqual(verify(cashflow["certificate"], self.public_keys(), product="pi-cashflow").org_id, org.org_id)
+        services.get_or_create_customer("boss@acme.co", org="Other Co")   # an organisation is kept, not replaced
+        self.assertEqual(Customer.objects.get(email="boss@acme.co").organisation, org)
 
     def test_add_page_shows(self):
         self.assertEqual(self.client.get(reverse("admin:licensing_license_add")).status_code, 200)

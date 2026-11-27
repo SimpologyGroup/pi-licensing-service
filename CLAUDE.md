@@ -21,6 +21,10 @@ Owner: Johann Kruger (Simpology). Design: https://claude.ai/artifact/VJAm4jcwHu1
   Bump the package version in `package/pyproject.toml` with every change, and the apps pin a commit in requirements.
 - One licence, one app account: `Activation` (unique per licence, app client + schema name); `services.InUse` when
   another account has it. Free licences are per account. Certificates name the account once tied.
+- Organisations (`Organisation`): `org_id` ORG-<pk, 5 digits> is set once on the first save from the primary key,
+  so it is unique across products and never reused; `save()` refuses a change and `delete()` refuses always (admin
+  too; Customer FK is PROTECT). Customers belong to one organisation; certificates carry `org` (name) and `org_id`
+  (optional claim). Manual licences in the admin pick a Customer (autocomplete), never type an email.
 - Products and tiers are data (`Product`, `Tier`), never code. The agreed tiers are in `licensing/catalogue.py`,
   loaded by migration 0002; later changes are made in the admin or by a new data migration.
 - Limits are a plain name → number map (`null` = unlimited). Safety Compliance counts clients + business units +

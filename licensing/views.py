@@ -90,7 +90,8 @@ def account_license(request):
         return error(403, "wrong_product", "This key may not ask about that product.")
     except services.NotFound as exc:
         return error(404, "unknown_product", str(exc))
-    customer = services.get_or_create_customer(email, request.GET.get("name", ""), request.GET.get("org", ""))
+    customer = services.get_or_create_customer(email, request.GET.get("name", ""), request.GET.get("org", ""),
+                                               request.GET.get("org_id", ""))
     account = request.GET.get("account", "").strip()
     license_ = services.current_license(customer, product, app_client=request.app_client, account_ref=account)
     if account:
@@ -138,7 +139,8 @@ def free_license(request):
         return error(403, "wrong_product", "This key may not ask about that product.")
     except services.NotFound as exc:
         return error(404, "unknown_product", str(exc))
-    customer = services.get_or_create_customer(email, body.get("name", ""), body.get("org", ""))
+    customer = services.get_or_create_customer(email, body.get("name", ""), body.get("org", ""),
+                                               str(body.get("org_id", "")))
     account = str(body.get("account", "")).strip()
     with transaction.atomic():
         license_ = services.ensure_free_license(customer, product, app_client=request.app_client, account_ref=account)

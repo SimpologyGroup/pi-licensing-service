@@ -18,7 +18,7 @@ from django.utils import timezone
 from pi_license import build_payload, sign, wrap
 
 from . import keystore
-from .models import Activation, Certificate, Customer, License, Product, Tier
+from .models import Activation, Certificate, Customer, License, Organisation, Product, Tier
 
 
 MANUAL_PROVIDER = "manual"  # issued by hand in the admin, no payment
@@ -43,13 +43,25 @@ def get_product(code: str) -> Product:
         raise NotFound(f"Unknown product {code!r}.") from exc
 
 
-def get_or_create_customer(email: str, name: str = "", org: str = "") -> Customer:
+def get_or_create_customer(email: str, name: str = "", org: str = "", org_id: str = "") -> Customer:
+    """The customer for an email (new ones are made). A customer without an organisation is put in the one named
+    by `org_id` (an existing Org ID), or else in a new organisation called `org`; one that has an organisation
+    keeps it (change it in the admin)."""
     email = normalise_email(email)
-    customer, created = Customer.objects.get_or_create(email=email, defaults={"name": name, "org": org})
-    if not created and ((name and not customer.name) or (org and not customer.org)):
-        customer.name = customer.name or name
-        customer.org = customer.org or org
-        customer.save(update_fields=["name", "org"])
+    customer, created = Customer.objects.get_or_create(email=email, defaults={"name": name})
+    changed = []
+    if name and not customer.name:
+        customer.name = name
+        changed.append("name")
+    if customer.organisation_id is None and (org_id or org):
+        organisation = Organisation.objects.filter(org_id=org_id.strip().upper()).first() if org_id else None
+        if organisation is None and org:
+            organisation = Organisation.objects.create(name=org)
+        if organisation is not None:
+            customer.organisation = organisation
+            changed.append("organisation")
+    if changed:
+        customer.save(update_fields=changed)
     return customer
 
 
@@ -178,7 +190,8 @@ def issue_certificate(license_: License, now=None) -> Certificate:
         lid=license_.lid,
         customer_id=license_.customer.public_id,
         email=license_.customer.email,
-        org=license_.customer.org,
+        org=license_.customer.org_name,
+        org_id=license_.customer.org_id,
         product=license_.product.code,
         plan=tier.code,
         limits=tier.limits,
@@ -250,6 +263,8 @@ def summary(license_: License, app_client=None, account_ref: str = "") -> dict:
         "product": license_.product.code,
         "plan": tier.code,
         "tier": tier.name,
+        "org_id": license_.customer.org_id,
+        "org": license_.customer.org_name,
         "free": tier.is_free,
         "status": license_.status,
         "status_label": license_.get_status_display(),
@@ -274,7 +289,8 @@ def describe(license_: License, now=None) -> dict:
         "limits": tier.limits,
         "features": tier.features,
         "email": license_.customer.email,
-        "org": license_.customer.org,
+        "org": license_.customer.org_name,
+        "org_id": license_.customer.org_id,
         "period_start": license_.period_start.isoformat(),
         "period_end": license_.period_end.isoformat(),
         "certificate": wrap(certificate.token),
