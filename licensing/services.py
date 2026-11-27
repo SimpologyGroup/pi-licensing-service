@@ -278,6 +278,7 @@ def summary(license_: License, app_client=None, account_ref: str = "") -> dict:
         "product": license_.product.code,
         "plan": tier.code,
         "tier": tier.name,
+        "email": license_.customer.email,
         "org_id": license_.customer.org_id,
         "org": license_.customer.org_name,
         "free": tier.is_free,
