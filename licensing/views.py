@@ -213,7 +213,8 @@ def license_certificate(request, lid):
 @require_POST
 @api_key_required
 def activation(request):
-    """Tie a licence to an app account (its schema name), e.g. after the customer uploads a certificate."""
+    """Tie a licence to an app account (its schema name), e.g. after the customer uploads a certificate. With
+    `org_id` (the organisation the app account is linked to) a licence of another organisation is refused."""
     body = _json_body(request)
     if body is None:
         return error(400, "bad_json", "The request body is not valid JSON.")
@@ -225,6 +226,11 @@ def activation(request):
         return error(400, "bad_account", "The app account is needed.")
     if not services.is_usable(license_):
         return error(409, "not_usable", f"This licence is {license_.get_status_display().lower()}.")
+    org = services.find_organisation(str(body.get("org_id", "")))
+    held_by = license_.customer.organisation
+    if body.get("org_id") and held_by is not None and held_by != org:
+        # an app account linked to an organisation only takes that organisation's licences
+        return error(409, "other_org", f"This licence belongs to another organisation ({held_by.org_id}).")
     try:
         services.record_activation(license_, request.app_client, account)
     except services.InUse as exc:

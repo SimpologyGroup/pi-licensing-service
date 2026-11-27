@@ -419,6 +419,16 @@ class OneAccountPerLicenceTests(LicensingTestCase):
         self.assertEqual(self.get("licenses_for_email", self.cashflow_key, org_id="ORG-99999",
                                   account="x").status_code, 404)
 
+    def test_activation_refuses_another_organisations_licence(self):
+        acme = Organisation.objects.create(name="Acme")
+        other = Organisation.objects.create(name="Other")
+        services.get_or_create_customer("boss@acme.co", org_id=acme.org_id)
+        lic = self.paid_license("boss@acme.co", "cashflow-t3")
+        r = self.post("activation", self.cashflow_key, {"lid": lic.lid, "account": "x", "org_id": other.org_id})
+        self.assertEqual((r.status_code, r.json()["error"]), (409, "other_org"))
+        r = self.post("activation", self.cashflow_key, {"lid": lic.lid, "account": "x", "org_id": acme.org_id})
+        self.assertEqual(r.status_code, 201)
+
     def test_organisation_lookup(self):
         org = Organisation.objects.create(name="Acme")
         r = self.get("organisation", self.cashflow_key, url_kwargs={"org_id": org.org_id.lower()})

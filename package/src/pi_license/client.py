@@ -112,5 +112,10 @@ class LicensingClient:
     def status(self, lid: str) -> dict:
         return self._request("GET", f"/v1/licenses/{lid}/status")
 
-    def activate(self, lid: str, account_ref: str) -> dict:
-        return self._request("POST", "/v1/activations", body={"lid": lid, "account": account_ref})
+    def activate(self, lid: str, account_ref: str, org_id: str = "") -> dict:
+        """Tie a licence to the account. With `org_id`, a licence of another organisation is refused
+        (ServiceError 409 `other_org`)."""
+        body = {"lid": lid, "account": account_ref}
+        if org_id:
+            body["org_id"] = org_id
+        return self._request("POST", "/v1/activations", body=body)

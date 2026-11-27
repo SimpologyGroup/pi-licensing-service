@@ -53,7 +53,7 @@ All calls except the public keys need `Authorization: Bearer <api key>`. App key
 | `POST /v1/free-licenses` `{email, product, name, org, org_id, account}` | website, app | Free Tier 1 licence at sign-up; with `account`, that app account's own free licence, tied to it (an account with no licence falls back to it) |
 | `GET /v1/licenses/<lid>/status` | app backend | Status; `current` is the licence now in use |
 | `GET /v1/licenses/<lid>/certificate` | app, website | The `.pilic` file |
-| `POST /v1/activations` `{lid, account}` | app backend | Tie a licence to an app account; `409 in_use` when another account has it |
+| `POST /v1/activations` `{lid, account, org_id}` | app backend | Tie a licence to an app account; `409 in_use` when another account has it, `409 other_org` when it belongs to another organisation than `org_id` |
 
 **One licence, one account.** A licence belongs to the first app account (in one app installation, i.e. one app
 key) that links or uploads it; its certificate then names that account (`account`) and installation
