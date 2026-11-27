@@ -102,12 +102,14 @@ def account_license(request):
 @require_GET
 @api_key_required
 def licenses_for_email(request):
-    """The licences held under an email for the product, for an app administrator to pick the one for their account
+    """The licences held under an email (or by every customer of an organisation, with `org_id`) for the product,
+    for an app administrator to pick the one for their account
     (`account`, its schema name). Each says whether it is free to use, used by this account or by another one.
     No certificates: the chosen one is tied to the account with POST /v1/activations, which returns it."""
+    org_id = request.GET.get("org_id", "")
     email = services.normalise_email(request.GET.get("email", ""))
-    if not _valid_email(email):
-        return error(400, "bad_email", "A valid email is needed.")
+    if not org_id and not _valid_email(email):
+        return error(400, "bad_email", "A valid email (or an Org ID) is needed.")
     account = request.GET.get("account", "").strip()
     if not account:
         return error(400, "bad_account", "The app account is needed.")
@@ -117,9 +119,25 @@ def licenses_for_email(request):
         return error(403, "wrong_product", "This key may not ask about that product.")
     except services.NotFound as exc:
         return error(404, "unknown_product", str(exc))
-    customer = services.get_or_create_customer(email)
-    licenses = services.licenses_for_email(customer, product, request.app_client, account)
+    if org_id:
+        organisation = services.find_organisation(org_id)
+        if organisation is None:
+            return error(404, "unknown_org", "There is no organisation with that Org ID.")
+        licenses = services.licenses_for_org(organisation, product)
+    else:
+        customer = services.get_or_create_customer(email)
+        licenses = services.licenses_for_email(customer, product, request.app_client, account)
     return JsonResponse({"licenses": [services.summary(x, request.app_client, account) for x in licenses]})
+
+
+@require_GET
+@api_key_required
+def organisation(request, org_id):
+    """An organisation by its Org ID, so an app can show its name before linking an account to it."""
+    found = services.find_organisation(org_id)
+    if found is None:
+        return error(404, "unknown_org", "There is no organisation with that Org ID.")
+    return JsonResponse({"organisation": {"org_id": found.org_id, "name": found.name}})
 
 
 @require_POST
@@ -195,7 +213,8 @@ def license_certificate(request, lid):
 @require_POST
 @api_key_required
 def activation(request):
-    """Tie a licence to an app account (its schema name), e.g. after the customer uploads a certificate."""
+    """Tie a licence to an app account (its schema name), e.g. after the customer uploads a certificate. With
+    `org_id` (the organisation the app account is linked to) a licence of another organisation is refused."""
     body = _json_body(request)
     if body is None:
         return error(400, "bad_json", "The request body is not valid JSON.")
@@ -207,6 +226,11 @@ def activation(request):
         return error(400, "bad_account", "The app account is needed.")
     if not services.is_usable(license_):
         return error(409, "not_usable", f"This licence is {license_.get_status_display().lower()}.")
+    org = services.find_organisation(str(body.get("org_id", "")))
+    held_by = license_.customer.organisation
+    if body.get("org_id") and held_by is not None and held_by != org:
+        # an app account linked to an organisation only takes that organisation's licences
+        return error(409, "other_org", f"This licence belongs to another organisation ({held_by.org_id}).")
     try:
         services.record_activation(license_, request.app_client, account)
     except services.InUse as exc:
