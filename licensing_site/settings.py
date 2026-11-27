@@ -1,6 +1,6 @@
 """Django settings for PI - Licensing Service.
 
-Same conventions as PI-Cashflow Management and PI - Safety Compliance Tracker: every machine-specific value
+Same conventions as PI-Cashflow Management and Safety Compliance Insight: every machine-specific value
 comes from environment variables or a .env file next to manage.py.
 """
 import os
@@ -125,3 +125,26 @@ LICENSE_SIGNING_KID = env("SIGNING_KID", "")
 LICENSE_GRACE_DAYS = int(env("LICENSE_GRACE_DAYS", "7"))
 LICENSE_CHECK_HOURS = int(env("LICENSE_CHECK_HOURS", "6"))
 FREE_LICENSE_DAYS = int(env("FREE_LICENSE_DAYS", "365"))
+
+# Store and Paddle payments. Without PADDLE_CLIENT_TOKEN the store shows the plans with "Coming soon".
+# PADDLE_ENV is "sandbox" for testing or "production". The client-side token is meant for the browser; the
+# webhook secret (Paddle → Developer Tools → Notifications) is not, and stays in .env.
+PADDLE_ENV = env("PADDLE_ENV", "sandbox")
+PADDLE_CLIENT_TOKEN = env("PADDLE_CLIENT_TOKEN", "")
+PADDLE_WEBHOOK_SECRET = env("PADDLE_WEBHOOK_SECRET", "")
+PADDLE_WEBHOOK_TOLERANCE_SECONDS = int(env("PADDLE_WEBHOOK_TOLERANCE_SECONDS", "300"))
+STORE_SUPPORT_EMAIL = env("STORE_SUPPORT_EMAIL", "support@performanceinsight.co.za")
+STORE_COMPANY = env("STORE_COMPANY", "Performance Insight")
+
+# Email (licence emails after a purchase). Without EMAIL_HOST emails are printed to the console.
+EMAIL_HOST = env("EMAIL_HOST", "")
+if EMAIL_HOST:
+    EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+    EMAIL_PORT = int(env("EMAIL_PORT", "587"))
+    EMAIL_HOST_USER = env("EMAIL_HOST_USER", "")
+    EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD", "")
+    EMAIL_USE_TLS = env_bool("EMAIL_USE_TLS", True)
+    EMAIL_USE_SSL = env_bool("EMAIL_USE_SSL", False)
+else:
+    EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", STORE_SUPPORT_EMAIL)

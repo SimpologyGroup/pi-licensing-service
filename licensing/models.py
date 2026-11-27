@@ -88,6 +88,8 @@ class Customer(models.Model):
     name = models.CharField(max_length=200, blank=True)
     organisation = models.ForeignKey(Organisation, null=True, blank=True, on_delete=models.PROTECT,
                                      related_name="customers")
+    provider_customer_id = models.CharField(max_length=100, blank=True, db_index=True,
+                                            help_text="The payment provider's customer id (Paddle ctm_...).")
     created = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -222,3 +224,24 @@ class Activation(models.Model):
 
     def is_for(self, app_client, account_ref) -> bool:
         return self.app_client_id == app_client.pk and self.account_ref == account_ref
+
+
+class WebhookEvent(models.Model):
+    """Every payment provider notification received, kept once (by event id) so a repeat is not applied twice."""
+
+    provider = models.CharField(max_length=20)
+    event_id = models.CharField(max_length=100)
+    event_type = models.CharField(max_length=60)
+    occurred_at = models.DateTimeField(null=True, blank=True)
+    subscription_id = models.CharField(max_length=100, blank=True, db_index=True)
+    received = models.DateTimeField(auto_now_add=True)
+    processed = models.DateTimeField(null=True, blank=True)
+    result = models.CharField(max_length=300, blank=True)
+    payload = models.JSONField(default=dict)
+
+    class Meta:
+        ordering = ["-received"]
+        constraints = [models.UniqueConstraint(fields=["provider", "event_id"], name="one_event_per_id")]
+
+    def __str__(self):
+        return f"{self.event_type} {self.event_id}"

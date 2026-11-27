@@ -1,0 +1,16 @@
+{% extends "licensing/store/base.html" %}
+{% block title %}Thank You{% endblock %}
+{% block content %}
+<h1>Thank You</h1>
+<div class="panel">
+  <p>Your payment went through{% if tier %} for <b>{{ tier.product.name }} – {{ tier.name }}</b>{% endif %}. Paddle emails your receipt,
+  and we email your licence within a few minutes.</p>
+  <p><b>To start using it:</b></p>
+  <ol class="steps">
+    <li>Sign in to the app as an administrator.</li>
+    <li>Open <b>Subscription</b> and click <b>Find Licences</b> (with the email you used here).</li>
+    <li>Click <b>Use This Licence</b>.</li>
+  </ol>
+  <p class="note">Nothing after ten minutes? Check your junk mail, or email <a href="mailto:{{ support }}">{{ support }}</a>.</p>
+</div>
+{% endblock %}

@@ -1,6 +1,6 @@
 # PI - Licensing Service
 
-One licensing service for the PI apps (PI - Safety Compliance Tracker, PI-Cashflow Management and later products).
+One licensing service for the PI apps (Safety Compliance Insight, PI-Cashflow Management and later products).
 It keeps each customer's licence per product, signs licence certificates, and answers the apps when they ask
 which tier an account is on.
 
@@ -75,7 +75,31 @@ is for a customer picked from the list (add a new customer with the + next to it
 cd package && ../.venv/bin/python -m unittest discover -s tests   # tests the installed package/src/pi_license
 ```
 
+## Store and Paddle payments
+
+`/store/` lists every active product's tiers with their prices and limits. Paid tiers get a **Subscribe** button
+once the store has a Paddle client-side token and the tier has a Paddle price id; otherwise they show "Coming Soon".
+The buyer types email, name and organisation (or an Org ID), then pays in Paddle's checkout. Paddle tells this
+service at `/webhooks/paddle`, which makes the licence (the customer joins the given organisation or a new one) and
+emails the licence id with the steps to use it (app → Subscription → Find Licences → Use This Licence).
+Upgrades, renewals, overdue payments and cancellations update the same licence; a cancelled one runs to the end of
+the paid year (plus the grace days), then the account is back on the free tier.
+
+To switch it on (sandbox first, at sandbox-vendors.paddle.com):
+
+1. In Paddle, make a product per app and a yearly USD price per paid tier. Copy each price id (`pri_...`) into the
+   tier's **Provider price id** in the admin (Products → the product → its tiers).
+2. Developer Tools → Authentication: make a **client-side token** → `PADDLE_CLIENT_TOKEN` in `.env`.
+3. Developer Tools → Notifications: new destination `https://<this service>/webhooks/paddle` with the
+   `subscription.*` and `customer.created`/`customer.updated` events; copy its secret key →
+   `PADDLE_WEBHOOK_SECRET`.
+4. Checkout → Website approval: add the store's domain; set the default payment link to `https://<this service>/store/`.
+5. Fill in the email settings in `.env` so the licence emails go out (without `EMAIL_HOST` they are printed).
+6. Restart. For production set `PADDLE_ENV=production` and use the live token, secret and price ids.
+
+Every notification is kept under Admin → Webhook events. One marked "Waiting" or "Failed" can be applied again with
+the **Process again** action.
+
 ## Not built yet
 
-Paddle payments (webhooks, checkout links), the website's licence pages, and the changes in both apps
-(sign-in lookup, upload screen, enforcing limits).
+A "Buy or upgrade" link from the apps' Subscription page to the store.
