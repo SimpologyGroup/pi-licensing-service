@@ -54,10 +54,19 @@ class CertificateInline(admin.TabularInline):
 
 
 class ActivationInline(admin.TabularInline):
+    """The account the licence belongs to (one at most). Tick Delete and save to release it, so the customer can
+    use the licence in another account."""
+
     model = Activation
     extra = 0
+    max_num = 1
+    verbose_name = "account using this licence"
+    verbose_name_plural = "account using this licence (delete to release it)"
     fields = ["account_ref", "app_client", "first_seen", "last_seen"]
     readonly_fields = fields
+
+    def has_add_permission(self, request, obj=None):
+        return False  # an app ties it when the account links or uploads it
 
 
 def months_to_days(months):
@@ -100,11 +109,16 @@ class IssueLicenceForm(forms.ModelForm):
 
 @admin.register(License)
 class LicenseAdmin(admin.ModelAdmin):
-    list_display = ["lid", "customer", "product", "tier", "status", "period_end", "provider"]
+    list_display = ["lid", "customer", "product", "tier", "status", "period_end", "provider", "used_by"]
     list_filter = ["product", "status", "tier"]
     search_fields = ["lid", "customer__email", "provider_subscription_id"]
     readonly_fields = ["lid", "created", "updated"]
     inlines = [CertificateInline, ActivationInline]
+
+    @admin.display(description="Used by account")
+    def used_by(self, obj):
+        act = obj.activations.first()
+        return f"{act.account_ref} ({act.app_client})" if act else "–"
     actions = ["download_certificate", "expire_now", "revoke", "reactivate", "extend_year"]
 
     def get_form(self, request, obj=None, **kwargs):

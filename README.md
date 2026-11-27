@@ -47,11 +47,18 @@ All calls except the public keys need `Authorization: Bearer <api key>`. App key
 | Call | Who | What |
 | --- | --- | --- |
 | `GET /.well-known/pi-license-keys` | anyone | Public keys (JWKS) for checking certificates |
-| `GET /v1/accounts/licenses?email=&product=&account=` | app backend | Licence in use for a verified email; free Tier 1 is issued when there is none |
+| `GET /v1/accounts/licenses?email=&product=&account=` | app backend | Licence to use for a verified email and account (ties it to the account); free Tier 1 is issued when there is none |
+| `GET /v1/licenses?email=&product=&account=` | app backend | The email's licences to pick from, each marked free to use, used by this account (`this`) or another (`other`); no certificates |
 | `POST /v1/free-licenses` `{email, product, name, org}` | website | Free Tier 1 licence at sign-up |
 | `GET /v1/licenses/<lid>/status` | app backend | Status; `current` is the licence now in use |
 | `GET /v1/licenses/<lid>/certificate` | app, website | The `.pilic` file |
-| `POST /v1/activations` `{lid, account}` | app backend | Tie an uploaded licence to an app account |
+| `POST /v1/activations` `{lid, account}` | app backend | Tie a licence to an app account; `409 in_use` when another account has it |
+
+**One licence, one account.** A licence belongs to the first app account (in one app installation, i.e. one app
+key) that links or uploads it; its certificate then names that account (`account`) and installation
+(`installation`, the middle part of the app key) and the apps refuse it anywhere else. One email can hold several
+licences (one per account); each account also gets its own free licence. To move a licence to another account,
+open it in the admin and delete the line under "account using this licence".
 
 ## Tests
 
