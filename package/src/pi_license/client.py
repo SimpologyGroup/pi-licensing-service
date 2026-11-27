@@ -3,11 +3,23 @@
 from __future__ import annotations
 
 import json
+import urllib.error
 import urllib.parse
 import urllib.request
 
 from .certificate import License, verify
 from .keys import keys_from_jwks
+
+
+class ServiceError(Exception):
+    """The service answered with an error, e.g. `in_use` (the licence belongs to another account) or `not_usable`.
+    `message` is plain wording that can be shown to the user."""
+
+    def __init__(self, status: int, code: str, message: str):
+        super().__init__(message)
+        self.status = status
+        self.code = code
+        self.message = message
 
 
 class LicensingClient:
@@ -30,8 +42,22 @@ class LicensingClient:
         request.add_header("Accept", "application/json")
         if data is not None:
             request.add_header("Content-Type", "application/json")
-        with urllib.request.urlopen(request, timeout=self.timeout) as response:
-            return json.loads(response.read())
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                return json.loads(response.read())
+        except urllib.error.HTTPError as exc:
+            try:
+                data = json.loads(exc.read() or b"{}")
+            except ValueError:
+                data = {}
+            raise ServiceError(exc.code, data.get("error", "error"),
+                               data.get("message", f"The licensing service answered {exc.code}.")) from exc
+
+    @property
+    def installation(self) -> str:
+        """This app installation's id as certificates name it: the middle part of the API key."""
+        parts = self.api_key.split("_")
+        return parts[1] if len(parts) >= 3 else ""
 
     def public_keys(self, refresh: bool = False) -> dict:
         if self._keys is None or refresh:
@@ -55,6 +81,13 @@ class LicensingClient:
         if org:
             query["org"] = org
         return self._request("GET", "/v1/accounts/licenses", query=query)
+
+    def licenses_for_email(self, email: str, account_ref: str) -> list:
+        """The licences held under an email for this product, for an administrator to pick one. Each says
+        whether it is free to use, already used by this account (`"account": "this"`) or by another (`"other"`).
+        A free-tier licence is issued when the email has none this account could use."""
+        return self._request("GET", "/v1/licenses", query={"email": email, "product": self.product,
+                                                            "account": account_ref})["licenses"]
 
     def status(self, lid: str) -> dict:
         return self._request("GET", f"/v1/licenses/{lid}/status")

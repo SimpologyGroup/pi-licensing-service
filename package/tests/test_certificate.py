@@ -21,6 +21,8 @@ def make(product="pi-safety", limits=None, expires_days=365, grace_days=7, key=N
         expires_at=NOW + timedelta(days=expires_days),
         grace_days=grace_days,
         issued_at=NOW,
+        account=extra.pop("account", ""),
+        installation=extra.pop("installation", ""),
     )
     payload.update(extra)
     return wrap(sign(payload, key, kid))
@@ -104,3 +106,50 @@ class CertificateTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AccountClaimTests(unittest.TestCase):
+    def test_unbound_certificate_has_no_account(self):
+        lic = verify(make(), PUBLIC, product="pi-safety", now=NOW)
+        self.assertEqual((lic.account, lic.installation), ("", ""))
+        self.assertNotIn("account", lic.raw)
+        self.assertFalse(lic.belongs_elsewhere("anything"))
+
+    def test_bound_certificate_names_account_and_installation(self):
+        lic = verify(make(account="acme", installation="ab12cd34"), PUBLIC, product="pi-safety", now=NOW)
+        self.assertEqual((lic.account, lic.installation), ("acme", "ab12cd34"))
+        self.assertTrue(lic.belongs_elsewhere("other"))
+        self.assertTrue(lic.belongs_elsewhere("acme", "ffff0000"))
+        self.assertFalse(lic.belongs_elsewhere("acme", "ab12cd34"))
+
+
+class ServiceErrorTests(unittest.TestCase):
+    def test_error_answer_becomes_service_error(self):
+        import json
+        import threading
+        from http.server import BaseHTTPRequestHandler, HTTPServer
+
+        from pi_license import LicensingClient, ServiceError
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self):
+                body = json.dumps({"error": "in_use", "message": "Used by another account."}).encode()
+                self.send_response(409)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+
+        server = HTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            client = LicensingClient(f"http://127.0.0.1:{server.server_port}", "pil_ab12cd34_secret", "pi-safety")
+            with self.assertRaises(ServiceError) as ctx:
+                client.activate("lic_1", "acme")
+            self.assertEqual((ctx.exception.status, ctx.exception.code), (409, "in_use"))
+            self.assertEqual(str(ctx.exception), "Used by another account.")
+            self.assertEqual(client.installation, "ab12cd34")
+        finally:
+            server.shutdown()

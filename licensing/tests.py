@@ -299,3 +299,89 @@ class TestScreenTests(LicensingTestCase):
         self.client.post(url, {"action": "reactivate", "_selected_action": [lic.pk]})
         self.assertEqual(self.get("account_license", self.cashflow_key, email="p@co.za").json()["license"]["plan"],
                          "cashflow-t4")
+
+
+class OneAccountPerLicenceTests(LicensingTestCase):
+    """A licence belongs to one app account; an email can hold several; the administrator picks."""
+
+    def test_second_account_refused(self):
+        paid = self.paid_license("boss@co.za", "cashflow-t3")
+        self.assertEqual(self.post("activation", self.cashflow_key, {"lid": paid.lid, "account": "acme"}).status_code, 201)
+        # the same account again is fine
+        self.assertEqual(self.post("activation", self.cashflow_key, {"lid": paid.lid, "account": "acme"}).status_code, 201)
+        r = self.post("activation", self.cashflow_key, {"lid": paid.lid, "account": "other"})
+        self.assertEqual(r.status_code, 409)
+        self.assertEqual(r.json()["error"], "in_use")
+        self.assertEqual(Activation.objects.get().account_ref, "acme")
+
+    def test_same_account_name_in_another_installation_refused(self):
+        paid = self.paid_license("boss@co.za", "cashflow-t3")
+        _, second_install = AppClient.create_with_key("Cash Flow, second Mac", self.cashflow)
+        self.post("activation", self.cashflow_key, {"lid": paid.lid, "account": "acme"})
+        r = self.post("activation", second_install, {"lid": paid.lid, "account": "acme"})
+        self.assertEqual(r.status_code, 409)
+
+    def test_certificate_names_the_account_once_tied(self):
+        paid = self.paid_license("boss@co.za", "cashflow-t3")
+        before = verify(services.describe(paid)["certificate"], self.public_keys(), product="pi-cashflow")
+        self.assertEqual(before.account, "")
+        data = self.post("activation", self.cashflow_key, {"lid": paid.lid, "account": "acme"}).json()["license"]
+        lic = verify(data["certificate"], self.public_keys(), product="pi-cashflow")
+        self.assertEqual(lic.account, "acme")
+        self.assertEqual(lic.installation, self.cashflow_key.split("_")[1])
+        self.assertTrue(lic.belongs_elsewhere("other"))
+        self.assertFalse(lic.belongs_elsewhere("acme", self.cashflow_key.split("_")[1]))
+        self.assertTrue(lic.belongs_elsewhere("acme", "otherinstall"))
+
+    def test_list_shows_licences_and_who_uses_them(self):
+        a = self.paid_license("reseller@co.za", "cashflow-t3")
+        b = self.paid_license("reseller@co.za", "cashflow-t2", days_left=100)
+        self.post("activation", self.cashflow_key, {"lid": a.lid, "account": "client1"})
+        r = self.get("licenses_for_email", self.cashflow_key, email="reseller@co.za", account="client2")
+        self.assertEqual(r.status_code, 200)
+        rows = {x["lid"]: x for x in r.json()["licenses"]}
+        self.assertEqual(rows[a.lid]["account"], "other")
+        self.assertEqual(rows[b.lid]["account"], "")
+        self.assertNotIn("certificate", rows[b.lid])
+        free = [x for x in rows.values() if x["free"]]
+        self.assertEqual(len(free), 1)   # a free licence this account could use is always offered
+        r = self.get("licenses_for_email", self.cashflow_key, email="reseller@co.za", account="client1")
+        self.assertEqual({x["lid"]: x for x in r.json()["licenses"]}[a.lid]["account"], "this")
+
+    def test_list_needs_the_account(self):
+        r = self.get("licenses_for_email", self.cashflow_key, email="x@co.za")
+        self.assertEqual(r.status_code, 400)
+
+    def test_each_account_gets_its_own_free_licence(self):
+        r1 = self.get("account_license", self.cashflow_key, email="one@co.za", account="acc1").json()["license"]
+        r2 = self.get("account_license", self.cashflow_key, email="one@co.za", account="acc2").json()["license"]
+        self.assertTrue(r1["free"] and r2["free"])
+        self.assertNotEqual(r1["lid"], r2["lid"])
+        again = self.get("account_license", self.cashflow_key, email="one@co.za", account="acc1").json()["license"]
+        self.assertEqual(again["lid"], r1["lid"])
+
+    def test_email_lookup_skips_paid_licence_used_elsewhere(self):
+        paid = self.paid_license("boss@co.za", "cashflow-t3")
+        self.post("activation", self.cashflow_key, {"lid": paid.lid, "account": "acme"})
+        r = self.get("account_license", self.cashflow_key, email="boss@co.za", account="second").json()["license"]
+        self.assertTrue(r["free"])
+        r = self.get("account_license", self.cashflow_key, email="boss@co.za", account="acme").json()["license"]
+        self.assertEqual(r["lid"], paid.lid)
+
+    def test_lapsed_licence_moves_its_account_to_a_free_one(self):
+        paid = self.paid_license("boss@co.za", "cashflow-t3")
+        self.post("activation", self.cashflow_key, {"lid": paid.lid, "account": "acme"})
+        License.objects.filter(pk=paid.pk).update(period_end=timezone.now() - timedelta(days=30))
+        r = self.get("license_status", self.cashflow_key, url_kwargs={"lid": paid.lid}).json()
+        self.assertFalse(r["usable"])
+        self.assertTrue(r["current"]["free"])
+        lic = verify(r["current"]["certificate"], self.public_keys(), product="pi-cashflow")
+        self.assertEqual(lic.account, "acme")
+
+    def test_released_licence_can_move(self):
+        paid = self.paid_license("boss@co.za", "cashflow-t3")
+        self.post("activation", self.cashflow_key, {"lid": paid.lid, "account": "acme"})
+        Activation.objects.filter(license=paid).delete()   # "Delete" in the admin
+        self.assertEqual(self.post("activation", self.cashflow_key, {"lid": paid.lid, "account": "new"}).status_code, 201)
+        data = services.describe(paid)
+        self.assertEqual(verify(data["certificate"], self.public_keys(), product="pi-cashflow").account, "new")

@@ -116,6 +116,7 @@ class Certificate(models.Model):
     status = models.CharField(max_length=20)
     issued_at = models.DateTimeField()
     expires_at = models.DateTimeField()
+    account_ref = models.CharField(max_length=100, blank=True, help_text="The app account it names, if any.")
     token = models.TextField()
 
     class Meta:
@@ -162,7 +163,9 @@ class AppClient(models.Model):
 
 
 class Activation(models.Model):
-    """Which app account (its schema name) uses a licence."""
+    """The one app account (its schema name, in one app installation = one app key) a licence belongs to.
+    A licence is tied to the first account that links or uploads it; other accounts are refused. Deleting the
+    activation in the admin releases the licence, so it can be used in another account."""
 
     license = models.ForeignKey(License, on_delete=models.CASCADE, related_name="activations")
     app_client = models.ForeignKey(AppClient, on_delete=models.PROTECT)
@@ -172,4 +175,10 @@ class Activation(models.Model):
 
     class Meta:
         ordering = ["-last_seen"]
-        constraints = [models.UniqueConstraint(fields=["license", "account_ref"], name="unique_activation")]
+        constraints = [models.UniqueConstraint(fields=["license"], name="one_account_per_licence")]
+
+    def __str__(self):
+        return f"{self.account_ref} ({self.app_client})"
+
+    def is_for(self, app_client, account_ref) -> bool:
+        return self.app_client_id == app_client.pk and self.account_ref == account_ref

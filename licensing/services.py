@@ -1,9 +1,13 @@
 """Licence rules.
 
-- Each customer has at most one licence per product in use. A paid licence that is active, payment overdue or
-  cancelled counts until its period end plus the grace days; after that it expires.
-- With no paid licence in use the customer is on the product's free tier: its licence is issued on the spot and
-  renews itself every FREE_LICENSE_DAYS. So a lapsed paid licence drops to the free tier, and no data is touched.
+- A paid licence that is active, payment overdue or cancelled counts until its period end plus the grace days;
+  after that it expires.
+- One licence, one app account: a licence is tied to the first account (in one app installation) that links or
+  uploads it (`Activation`); other accounts are refused (`InUse`) until it is released in the admin. A customer
+  (email) can hold several licences, e.g. one per account; the app's administrator picks which one to use.
+- An account with no paid licence in use is on the product's free tier: a free licence for that account is issued
+  on the spot and renews itself every FREE_LICENSE_DAYS. So a lapsed paid licence drops to the free tier, and no
+  data is touched.
 """
 
 from datetime import timedelta
@@ -22,6 +26,10 @@ MANUAL_PROVIDER = "manual"  # issued by hand in the admin, no payment
 
 class NotFound(Exception):
     pass
+
+
+class InUse(Exception):
+    """The licence already belongs to another app account."""
 
 
 def normalise_email(email: str) -> str:
@@ -76,15 +84,38 @@ def is_usable(license_: License, now=None) -> bool:
     return refresh(license_, now).status in License.USABLE
 
 
+def binding(license_: License):
+    """The account the licence belongs to (an Activation), or None while it is not tied to one."""
+    return license_.activations.select_related("app_client").first()
+
+
+def relation(license_: License, app_client=None, account_ref: str = "") -> str:
+    """'' = free to use, 'this' = used by the account asking, 'other' = used by another account."""
+    act = binding(license_)
+    if act is None:
+        return ""
+    return "this" if app_client is not None and account_ref and act.is_for(app_client, account_ref) else "other"
+
+
 @transaction.atomic
-def ensure_free_license(customer: Customer, product: Product, now=None) -> License:
+def ensure_free_license(customer: Customer, product: Product, now=None, app_client=None,
+                        account_ref: str = "") -> License:
+    """The free licence to use: for an account, the one tied to it or one not tied to any account (a new one when
+    every free licence of this email is used by other accounts). Without an account (website sign-up): the first."""
     now = now or timezone.now()
-    existing = (
+    candidates = list(
         License.objects.select_for_update()
         .filter(customer=customer, product=product, tier__is_free=True)
         .exclude(status=License.REVOKED)
-        .first()
+        .order_by("created", "pk")
     )
+    if account_ref:
+        ranked = [x for x in candidates if relation(x, app_client, account_ref) == "this"] + [
+            x for x in candidates if relation(x, app_client, account_ref) == ""]
+        existing = ranked[0] if ranked else None
+    else:
+        free_to_use = [x for x in candidates if binding(x) is None]
+        existing = (free_to_use or candidates or [None])[0]
     if existing:
         if existing.status != License.ACTIVE:
             existing.status = License.ACTIVE
@@ -100,24 +131,49 @@ def ensure_free_license(customer: Customer, product: Product, now=None) -> Licen
     )
 
 
-def current_license(customer: Customer, product: Product, now=None) -> License:
-    """The licence in use: the newest usable paid one, else the free tier."""
+def current_license(customer: Customer, product: Product, now=None, app_client=None, account_ref: str = "") -> License:
+    """The licence to use: the paid one tied to this account, else the newest usable paid one no other account uses,
+    else the free tier. Without an account: the newest usable paid one (any), else the free tier."""
     now = now or timezone.now()
-    paid = (
+    paid = list(
         License.objects.filter(customer=customer, product=product, tier__is_free=False, status__in=License.USABLE)
         .select_related("tier", "product", "customer")
         .order_by("-period_end")
     )
+    if account_ref:
+        paid = [x for x in paid if relation(x, app_client, account_ref) == "this"] + [
+            x for x in paid if relation(x, app_client, account_ref) == ""]
     for license_ in paid:
         if is_usable(license_, now):
             return license_
-    return ensure_free_license(customer, product, now)
+    return ensure_free_license(customer, product, now, app_client, account_ref)
+
+
+def licenses_for_email(customer: Customer, product: Product, app_client, account_ref: str, now=None) -> list:
+    """What an administrator can pick from: the email's usable licences for the product, newest first, each with
+    its relation to the account asking. A free licence this account can use is always among them."""
+    now = now or timezone.now()
+    ensure_free_license(customer, product, now, app_client, account_ref)
+    out = []
+    for license_ in (License.objects.filter(customer=customer, product=product)
+                     .select_related("tier", "product", "customer").order_by("tier__is_free", "-period_end")):
+        if not is_usable(license_, now):
+            continue
+        out.append(license_)
+    return out
+
+
+def _bound_to(license_: License):
+    """(account, installation) the certificate names: empty while the licence is not tied to an account."""
+    act = binding(license_)
+    return (act.account_ref, act.app_client.key_prefix) if act else ("", "")
 
 
 def issue_certificate(license_: License, now=None) -> Certificate:
     now = now or timezone.now()
     kid, key = keystore.current()
     tier = license_.tier
+    account, installation = _bound_to(license_)
     payload = build_payload(
         lid=license_.lid,
         customer_id=license_.customer.public_id,
@@ -139,6 +195,8 @@ def issue_certificate(license_: License, now=None) -> Certificate:
         grace_days=0 if tier.is_free else settings.LICENSE_GRACE_DAYS,
         check_hours=settings.LICENSE_CHECK_HOURS,
         issued_at=now,
+        account=account,
+        installation=installation,
     )
     return Certificate.objects.create(
         license=license_,
@@ -147,6 +205,7 @@ def issue_certificate(license_: License, now=None) -> Certificate:
         status=license_.status,
         issued_at=now,
         expires_at=license_.period_end,
+        account_ref=f"{installation}:{account}" if account else "",
         token=sign(payload, key, kid),
     )
 
@@ -156,22 +215,49 @@ def current_certificate(license_: License, now=None) -> Certificate:
     new one. Reusing it keeps the certificate table small when apps ask often."""
     kid, _ = keystore.current()
     latest = license_.certificates.first()
+    account, installation = _bound_to(license_)
     if (
         latest
         and latest.plan == license_.tier.code
         and latest.status == license_.status
         and latest.expires_at == license_.period_end
         and latest.kid == kid
+        and latest.account_ref == (f"{installation}:{account}" if account else "")
     ):
         return latest
     return issue_certificate(license_, now)
 
 
+@transaction.atomic
 def record_activation(license_: License, app_client, account_ref: str) -> Activation:
-    activation, _ = Activation.objects.update_or_create(
-        license=license_, account_ref=account_ref, defaults={"app_client": app_client}
-    )
-    return activation
+    """Tie the licence to this account, or confirm it already is. Raises InUse when another account has it."""
+    License.objects.select_for_update().filter(pk=license_.pk).first()  # one at a time per licence
+    act = binding(license_)
+    if act is not None:
+        if not act.is_for(app_client, account_ref):
+            raise InUse("This licence is already used by another account. Each licence is for one account: "
+                        "use another licence, or ask us to release it.")
+        act.save(update_fields=["last_seen"])
+        return act
+    return Activation.objects.create(license=license_, app_client=app_client, account_ref=account_ref)
+
+
+def summary(license_: License, app_client=None, account_ref: str = "") -> dict:
+    """A licence without its certificate, for the list an administrator picks from."""
+    tier = license_.tier
+    return {
+        "lid": license_.lid,
+        "product": license_.product.code,
+        "plan": tier.code,
+        "tier": tier.name,
+        "free": tier.is_free,
+        "status": license_.status,
+        "status_label": license_.get_status_display(),
+        "limits": tier.limits,
+        "period_start": license_.period_start.isoformat(),
+        "period_end": license_.period_end.isoformat(),
+        "account": relation(license_, app_client, account_ref),
+    }
 
 
 def describe(license_: License, now=None) -> dict:

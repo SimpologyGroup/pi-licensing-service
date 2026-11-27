@@ -77,8 +77,9 @@ def public_keys(request):
 @require_GET
 @api_key_required
 def account_license(request):
-    """Automatic linking: the current licence for a verified email (free tier issued when there is none).
-    `account` (the app account's schema name) is recorded as an activation when given."""
+    """Automatic linking: the licence to use for a verified email (free tier issued when there is none).
+    With `account` (the app account's schema name) only licences free to use or already tied to that account count,
+    and the one returned is tied to it."""
     email = services.normalise_email(request.GET.get("email", ""))
     if not _valid_email(email):
         return error(400, "bad_email", "A valid email is needed.")
@@ -89,11 +90,34 @@ def account_license(request):
     except services.NotFound as exc:
         return error(404, "unknown_product", str(exc))
     customer = services.get_or_create_customer(email, request.GET.get("name", ""), request.GET.get("org", ""))
-    license_ = services.current_license(customer, product)
     account = request.GET.get("account", "").strip()
+    license_ = services.current_license(customer, product, app_client=request.app_client, account_ref=account)
     if account:
         services.record_activation(license_, request.app_client, account)
     return JsonResponse({"license": services.describe(license_)})
+
+
+@require_GET
+@api_key_required
+def licenses_for_email(request):
+    """The licences held under an email for the product, for an app administrator to pick the one for their account
+    (`account`, its schema name). Each says whether it is free to use, used by this account or by another one.
+    No certificates: the chosen one is tied to the account with POST /v1/activations, which returns it."""
+    email = services.normalise_email(request.GET.get("email", ""))
+    if not _valid_email(email):
+        return error(400, "bad_email", "A valid email is needed.")
+    account = request.GET.get("account", "").strip()
+    if not account:
+        return error(400, "bad_account", "The app account is needed.")
+    try:
+        product = _product_for(request, request.GET.get("product", ""))
+    except PermissionError:
+        return error(403, "wrong_product", "This key may not ask about that product.")
+    except services.NotFound as exc:
+        return error(404, "unknown_product", str(exc))
+    customer = services.get_or_create_customer(email)
+    licenses = services.licenses_for_email(customer, product, request.app_client, account)
+    return JsonResponse({"licenses": [services.summary(x, request.app_client, account) for x in licenses]})
 
 
 @require_POST
@@ -125,7 +149,16 @@ def license_status(request, lid):
     if license_ is None:
         return error(404, "not_found", "No such licence.")
     usable = services.is_usable(license_)
-    current = license_ if usable else services.current_license(license_.customer, license_.product)
+    current = license_
+    if not usable:
+        # The account it belonged to moves on to the customer's next licence for it (free tier at least).
+        act = services.binding(license_)
+        if act is not None and act.app_client_id == request.app_client.pk:
+            current = services.current_license(license_.customer, license_.product,
+                                               app_client=request.app_client, account_ref=act.account_ref)
+            services.record_activation(current, request.app_client, act.account_ref)
+        else:
+            current = services.current_license(license_.customer, license_.product)
     return JsonResponse(
         {
             "lid": license_.lid,
@@ -165,5 +198,8 @@ def activation(request):
         return error(400, "bad_account", "The app account is needed.")
     if not services.is_usable(license_):
         return error(409, "not_usable", f"This licence is {license_.get_status_display().lower()}.")
-    services.record_activation(license_, request.app_client, account)
+    try:
+        services.record_activation(license_, request.app_client, account)
+    except services.InUse as exc:
+        return error(409, "in_use", str(exc))
     return JsonResponse({"license": services.describe(license_)}, status=201)

@@ -16,6 +16,8 @@ from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 
 ISSUER = "pi-licensing"
+# Optional claims added later ("account", "installation") are left out when empty and ignored by older packages,
+# so they did not need a new version. A change older packages would misread does.
 SCHEMA_VERSION = 1
 TYP = "pi-license+jws"
 BEGIN = "-----BEGIN PI LICENSE-----"
@@ -64,6 +66,16 @@ class License:
     grace_days: int
     check_after: datetime
     raw: dict = field(repr=False, default_factory=dict)
+    # The app account the licence is tied to (its schema name) and the app installation (the first part of that
+    # app's API key, "pil_<installation>_..."); empty while the licence is not tied to an account yet.
+    account: str = ""
+    installation: str = ""
+
+    def belongs_elsewhere(self, account: str, installation: str = "") -> bool:
+        """True if the certificate names another account (or another installation) than the one given."""
+        if self.account and self.account != account:
+            return True
+        return bool(self.installation and installation and self.installation != installation)
 
     def limit(self, name: str):
         """The cap for one counter, or None for unlimited. A counter the plan does not name is 0."""
@@ -121,9 +133,11 @@ def build_payload(
     grace_days: int = 7,
     check_hours: int = 6,
     issued_at: datetime | None = None,
+    account: str = "",
+    installation: str = "",
 ) -> dict:
     issued_at = issued_at or datetime.now(timezone.utc)
-    return {
+    payload = {
         "ver": SCHEMA_VERSION,
         "iss": ISSUER,
         "lid": lid,
@@ -141,6 +155,10 @@ def build_payload(
         "grace_days": grace_days,
         "check_after": _iso(issued_at + timedelta(hours=check_hours)),
     }
+    if account:  # only once the licence is tied to an app account
+        payload["account"] = account
+        payload["installation"] = installation
+    return payload
 
 
 def load_public_key(raw: bytes | str) -> Ed25519PublicKey:
@@ -228,4 +246,6 @@ def verify(
         grace_days=payload.get("grace_days", 0),
         check_after=_parse_iso(payload["check_after"]),
         raw=payload,
+        account=payload.get("account", ""),
+        installation=payload.get("installation", ""),
     )
