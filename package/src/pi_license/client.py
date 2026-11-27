@@ -82,6 +82,12 @@ class LicensingClient:
             query["org"] = org
         return self._request("GET", "/v1/accounts/licenses", query=query)
 
+    def free_licence(self, email: str, account_ref: str) -> dict:
+        """The free-tier licence of an app account (issued when it has none, tied to the account). For an account
+        that has no licence yet: it falls back to the free tier without anyone picking a licence."""
+        return self._request("POST", "/v1/free-licenses", body={"email": email, "product": self.product,
+                                                                "account": account_ref})
+
     def licenses_for_email(self, email: str, account_ref: str) -> list:
         """The licences held under an email for this product, for an administrator to pick one. Each says
         whether it is free to use, already used by this account (`"account": "this"`) or by another (`"other"`).

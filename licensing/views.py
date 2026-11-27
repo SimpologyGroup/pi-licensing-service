@@ -9,6 +9,7 @@ from functools import wraps
 
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
+from django.db import transaction
 from django.http import HttpResponse, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
@@ -123,7 +124,8 @@ def licenses_for_email(request):
 @require_POST
 @api_key_required
 def free_license(request):
-    """Website sign-up: issue (or return) the free-tier licence for an email and product."""
+    """Website sign-up: issue (or return) the free-tier licence for an email and product. With `account` (an app
+    account's schema name): the free licence of that account, tied to it (never a paid one)."""
     body = _json_body(request)
     if body is None:
         return error(400, "bad_json", "The request body is not valid JSON.")
@@ -137,7 +139,12 @@ def free_license(request):
     except services.NotFound as exc:
         return error(404, "unknown_product", str(exc))
     customer = services.get_or_create_customer(email, body.get("name", ""), body.get("org", ""))
-    license_ = services.ensure_free_license(customer, product)
+    account = str(body.get("account", "")).strip()
+    with transaction.atomic():
+        license_ = services.ensure_free_license(customer, product, app_client=request.app_client, account_ref=account)
+        if account:
+            # An app account without a licence falls back to the free tier: its own free licence, tied to it.
+            services.record_activation(license_, request.app_client, account)
     return JsonResponse({"license": services.describe(license_)}, status=201)
 
 
