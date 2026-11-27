@@ -84,11 +84,23 @@ class LicensingClient:
             query["org_id"] = org_id
         return self._request("GET", "/v1/accounts/licenses", query=query)
 
-    def free_licence(self, email: str, account_ref: str) -> dict:
+    def organisation(self, org_id: str) -> dict:
+        """{"org_id", "name"} of an organisation; ServiceError 404 `unknown_org` when there is none."""
+        return self._request("GET", f"/v1/organisations/{urllib.parse.quote(org_id.strip())}")["organisation"]
+
+    def licenses_for_org(self, org_id: str, account_ref: str) -> list:
+        """The licences of every customer in the organisation for this product, to pick one (as licenses_for_email,
+        each marked free to use, used by this account or by another)."""
+        return self._request("GET", "/v1/licenses", query={"org_id": org_id, "product": self.product,
+                                                            "account": account_ref})["licenses"]
+
+    def free_licence(self, email: str, account_ref: str, org_id: str = "") -> dict:
         """The free-tier licence of an app account (issued when it has none, tied to the account). For an account
         that has no licence yet: it falls back to the free tier without anyone picking a licence."""
-        return self._request("POST", "/v1/free-licenses", body={"email": email, "product": self.product,
-                                                                "account": account_ref})
+        body = {"email": email, "product": self.product, "account": account_ref}
+        if org_id:  # a new customer joins the account's organisation
+            body["org_id"] = org_id
+        return self._request("POST", "/v1/free-licenses", body=body)
 
     def licenses_for_email(self, email: str, account_ref: str) -> list:
         """The licences held under an email for this product, for an administrator to pick one. Each says

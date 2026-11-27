@@ -401,6 +401,31 @@ class OneAccountPerLicenceTests(LicensingTestCase):
                                                               "account": "second"}).json()["license"]
         self.assertNotEqual(other["lid"], data["lid"])
 
+    def test_licences_found_by_org_id(self):
+        org = Organisation.objects.create(name="Acme")
+        boss = services.get_or_create_customer("boss@acme.co", org_id=org.org_id)
+        services.get_or_create_customer("finance@acme.co", org_id=org.org_id)
+        a = self.paid_license("boss@acme.co", "cashflow-t3")
+        b = self.paid_license("finance@acme.co", "cashflow-t2")
+        self.paid_license("someone@else.co", "cashflow-t3")   # another organisation
+        self.paid_license("boss@acme.co", "safety-t3")       # another product
+        self.post("activation", self.cashflow_key, {"lid": a.lid, "account": "acme"})
+        r = self.get("licenses_for_email", self.cashflow_key, org_id=org.org_id.lower(), account="second")
+        rows = {x["lid"]: x for x in r.json()["licenses"]}
+        self.assertEqual(set(rows), {a.lid, b.lid})
+        self.assertEqual((rows[a.lid]["account"], rows[b.lid]["account"]), ("other", ""))
+        self.assertEqual(rows[b.lid]["org_id"], org.org_id)
+        self.assertEqual(boss.organisation, org)
+        self.assertEqual(self.get("licenses_for_email", self.cashflow_key, org_id="ORG-99999",
+                                  account="x").status_code, 404)
+
+    def test_organisation_lookup(self):
+        org = Organisation.objects.create(name="Acme")
+        r = self.get("organisation", self.cashflow_key, url_kwargs={"org_id": org.org_id.lower()})
+        self.assertEqual(r.json()["organisation"], {"org_id": org.org_id, "name": "Acme"})
+        self.assertEqual(self.get("organisation", self.cashflow_key, url_kwargs={"org_id": "ORG-99999"}).status_code,
+                         404)
+
     def test_list_needs_the_account(self):
         r = self.get("licenses_for_email", self.cashflow_key, email="x@co.za")
         self.assertEqual(r.status_code, 400)

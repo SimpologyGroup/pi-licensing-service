@@ -175,6 +175,21 @@ def licenses_for_email(customer: Customer, product: Product, app_client, account
     return out
 
 
+def licenses_for_org(organisation: Organisation, product: Product, now=None) -> list:
+    """The usable licences of every customer in an organisation for the product, paid first, newest first: what an
+    app account linked to that organisation picks from."""
+    now = now or timezone.now()
+    return [x for x in License.objects.filter(customer__organisation=organisation, product=product)
+            .select_related("tier", "product", "customer", "customer__organisation")
+            .order_by("tier__is_free", "-period_end") if is_usable(x, now)]
+
+
+def find_organisation(org_id: str):
+    """The organisation with this Org ID (any case, spaces ignored), or None."""
+    org_id = "".join((org_id or "").split()).upper()
+    return Organisation.objects.filter(org_id=org_id).first() if org_id else None
+
+
 def _bound_to(license_: License):
     """(account, installation) the certificate names: empty while the licence is not tied to an account."""
     act = binding(license_)

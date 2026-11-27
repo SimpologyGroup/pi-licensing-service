@@ -48,7 +48,8 @@ All calls except the public keys need `Authorization: Bearer <api key>`. App key
 | --- | --- | --- |
 | `GET /.well-known/pi-license-keys` | anyone | Public keys (JWKS) for checking certificates |
 | `GET /v1/accounts/licenses?email=&product=&account=&org_id=` | app backend | Licence to use for a verified email and account (ties it to the account); free Tier 1 is issued when there is none |
-| `GET /v1/licenses?email=&product=&account=` | app backend | The email's licences to pick from, each marked free to use, used by this account (`this`) or another (`other`); no certificates |
+| `GET /v1/licenses?email=&product=&account=` (or `org_id=` instead of `email=`) | app backend | The email's licences (or all the organisation's licences) to pick from, each marked free to use, used by this account (`this`) or another (`other`); no certificates |
+| `GET /v1/organisations/<org_id>` | app backend | The organisation's Org ID and name, to link an app account to it |
 | `POST /v1/free-licenses` `{email, product, name, org, org_id, account}` | website, app | Free Tier 1 licence at sign-up; with `account`, that app account's own free licence, tied to it (an account with no licence falls back to it) |
 | `GET /v1/licenses/<lid>/status` | app backend | Status; `current` is the licence now in use |
 | `GET /v1/licenses/<lid>/certificate` | app, website | The `.pilic` file |
