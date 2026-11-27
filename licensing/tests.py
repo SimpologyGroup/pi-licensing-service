@@ -348,6 +348,21 @@ class OneAccountPerLicenceTests(LicensingTestCase):
         r = self.get("licenses_for_email", self.cashflow_key, email="reseller@co.za", account="client1")
         self.assertEqual({x["lid"]: x for x in r.json()["licenses"]}[a.lid]["account"], "this")
 
+    def test_account_falls_back_to_its_own_free_licence(self):
+        paid = self.paid_license("boss@co.za", "cashflow-t3")  # a paid licence under the email is never picked
+        r = self.post("free_license", self.cashflow_key, {"email": "boss@co.za", "product": "pi-cashflow",
+                                                          "account": "acme"})
+        data = r.json()["license"]
+        self.assertTrue(data["free"])
+        self.assertNotEqual(data["lid"], paid.lid)
+        self.assertEqual(verify(data["certificate"], self.public_keys(), product="pi-cashflow").account, "acme")
+        again = self.post("free_license", self.cashflow_key, {"email": "boss@co.za", "product": "pi-cashflow",
+                                                              "account": "acme"}).json()["license"]
+        self.assertEqual(again["lid"], data["lid"])
+        other = self.post("free_license", self.cashflow_key, {"email": "boss@co.za", "product": "pi-cashflow",
+                                                              "account": "second"}).json()["license"]
+        self.assertNotEqual(other["lid"], data["lid"])
+
     def test_list_needs_the_account(self):
         r = self.get("licenses_for_email", self.cashflow_key, email="x@co.za")
         self.assertEqual(r.status_code, 400)

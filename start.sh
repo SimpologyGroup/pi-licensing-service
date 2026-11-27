@@ -48,5 +48,11 @@ if [ "${1:-}" = "--install" ]; then
 fi
 
 .venv/bin/python manage.py migrate --noinput
+# Certificates cannot be issued without a signing key: say so now, not as an error in the apps later.
+.venv/bin/python manage.py shell -v0 -c 'from licensing import keystore; keystore.current()' 2>/dev/null || {
+    echo "No signing key yet. Run: .venv/bin/python manage.py generate_signing_key" >&2
+    echo "then put the SIGNING_KID it prints in .env and run ./start.sh again." >&2
+    exit 1
+}
 .venv/bin/python manage.py collectstatic --noinput -v0
 exec .venv/bin/waitress-serve --listen=127.0.0.1:${PORT:-8002} licensing_site.wsgi:application
