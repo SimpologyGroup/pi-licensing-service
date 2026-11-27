@@ -73,13 +73,15 @@ class LicensingClient:
             # A new signing key may have been added since the keys were cached.
             return verify(certificate, self.public_keys(refresh=True), product=self.product)
 
-    def license_for_email(self, email: str, account_ref: str = "", org: str = "") -> dict:
+    def license_for_email(self, email: str, account_ref: str = "", org: str = "", org_id: str = "") -> dict:
         """The current licence for a verified email (free Tier 1 is issued when there is none)."""
         query = {"email": email, "product": self.product}
         if account_ref:
             query["account"] = account_ref
         if org:
             query["org"] = org
+        if org_id:
+            query["org_id"] = org_id
         return self._request("GET", "/v1/accounts/licenses", query=query)
 
     def free_licence(self, email: str, account_ref: str) -> dict:

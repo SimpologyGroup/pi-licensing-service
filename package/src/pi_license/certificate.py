@@ -70,6 +70,9 @@ class License:
     # app's API key, "pil_<installation>_..."); empty while the licence is not tied to an account yet.
     account: str = ""
     installation: str = ""
+    # The organisation's Org ID (ORG-00001 ...), the same in every PI app; `org` is its name. Empty in older
+    # certificates and for customers without an organisation.
+    org_id: str = ""
 
     def belongs_elsewhere(self, account: str, installation: str = "") -> bool:
         """True if the certificate names another account (or another installation) than the one given."""
@@ -135,6 +138,7 @@ def build_payload(
     issued_at: datetime | None = None,
     account: str = "",
     installation: str = "",
+    org_id: str = "",
 ) -> dict:
     issued_at = issued_at or datetime.now(timezone.utc)
     payload = {
@@ -155,6 +159,8 @@ def build_payload(
         "grace_days": grace_days,
         "check_after": _iso(issued_at + timedelta(hours=check_hours)),
     }
+    if org_id:  # left out when empty, like account/installation: older packages ignore it
+        payload["org_id"] = org_id
     if account:  # only once the licence is tied to an app account
         payload["account"] = account
         payload["installation"] = installation
@@ -248,4 +254,5 @@ def verify(
         raw=payload,
         account=payload.get("account", ""),
         installation=payload.get("installation", ""),
+        org_id=payload.get("org_id", ""),
     )

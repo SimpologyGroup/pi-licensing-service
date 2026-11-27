@@ -23,6 +23,7 @@ def make(product="pi-safety", limits=None, expires_days=365, grace_days=7, key=N
         issued_at=NOW,
         account=extra.pop("account", ""),
         installation=extra.pop("installation", ""),
+        org_id=extra.pop("org_id", ""),
     )
     payload.update(extra)
     return wrap(sign(payload, key, kid))
@@ -38,6 +39,12 @@ class CertificateTests(unittest.TestCase):
         self.assertEqual(lic.plan, "safety-t1")
         self.assertEqual(lic.limits, {"org_units": 5, "resources": 10})
         self.assertEqual(lic.email, "jane@acme.co")
+
+    def test_org_id_claim_only_when_set(self):
+        self.assertEqual(verify(make(), PUBLIC, now=NOW).org_id, "")
+        self.assertNotIn("org_id", verify(make(), PUBLIC, now=NOW).raw)
+        lic = verify(make(org_id="ORG-00007"), PUBLIC, now=NOW)
+        self.assertEqual((lic.org_id, lic.org), ("ORG-00007", "Acme"))
 
     def test_envelope_and_bare_token_both_accepted(self):
         text = make()

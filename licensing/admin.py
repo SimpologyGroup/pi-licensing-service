@@ -8,7 +8,7 @@ from django.utils import timezone
 
 from . import services
 
-from .models import Activation, AppClient, Certificate, Customer, License, Product, Tier
+from .models import Activation, AppClient, Certificate, Customer, License, Organisation, Product, Tier
 
 
 class TierInline(admin.TabularInline):
@@ -40,9 +40,41 @@ class LicenseInline(admin.TabularInline):
 
 @admin.register(Customer)
 class CustomerAdmin(admin.ModelAdmin):
-    list_display = ["email", "name", "org", "created"]
-    search_fields = ["email", "name", "org"]
+    list_display = ["email", "name", "organisation", "created"]
+    search_fields = ["email", "name", "organisation__org_id", "organisation__name"]
+    autocomplete_fields = ["organisation"]
     inlines = [LicenseInline]
+
+
+class CustomerInline(admin.TabularInline):
+    model = Customer
+    extra = 0
+    fields = ["email", "name"]
+    readonly_fields = fields
+    can_delete = False
+    show_change_link = True
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(Organisation)
+class OrganisationAdmin(admin.ModelAdmin):
+    """The Org ID is given when the organisation is first saved and never changes; organisations are never
+    deleted (their Org ID is in licences and certificates). The same organisation holds licences for every app."""
+
+    list_display = ["org_id", "name", "customer_count", "created"]
+    search_fields = ["org_id", "name"]
+    readonly_fields = ["org_id", "created"]
+    fields = ["org_id", "name", "created"]
+    inlines = [CustomerInline]
+
+    @admin.display(description="customers")
+    def customer_count(self, obj):
+        return obj.customers.count()
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 class CertificateInline(admin.TabularInline):
@@ -74,29 +106,26 @@ def months_to_days(months):
 
 
 class IssueLicenceForm(forms.ModelForm):
-    """Issue a licence by hand, with no payment: for testing and for special arrangements."""
+    """Issue a licence by hand, with no payment: for testing and for special arrangements. The customer is picked
+    from the customers (add a new one with the + next to the list); their organisation goes with them."""
 
-    email = forms.EmailField(help_text="The customer's email; they are created if new.")
-    org = forms.CharField(label="Organisation", required=False)
     months = forms.IntegerField(min_value=1, max_value=60, initial=12, help_text="Length of the period.")
 
     class Meta:
         model = License
-        fields = ["tier", "status"]
+        fields = ["customer", "tier", "status"]
 
     def clean(self):
         data = super().clean()
-        tier = data.get("tier")
-        if tier and tier.is_free and data.get("email"):
-            customer = Customer.objects.filter(email=services.normalise_email(data["email"])).first()
-            if customer and License.objects.filter(customer=customer, product=tier.product,
-                                                   tier__is_free=True).exists():
-                raise forms.ValidationError("This customer already has the free tier for that product.")
+        tier, customer = data.get("tier"), data.get("customer")
+        if tier and tier.is_free and customer and License.objects.filter(
+                customer=customer, product=tier.product, tier__is_free=True).exists():
+            raise forms.ValidationError("This customer already has the free tier for that product.")
         return data
 
     def save(self, commit=True):
         tier = self.cleaned_data["tier"]
-        customer = services.get_or_create_customer(self.cleaned_data["email"], org=self.cleaned_data["org"])
+        customer = self.cleaned_data["customer"]
         now = timezone.now()
         license_ = self.instance
         license_.customer = customer
@@ -109,10 +138,17 @@ class IssueLicenceForm(forms.ModelForm):
 
 @admin.register(License)
 class LicenseAdmin(admin.ModelAdmin):
-    list_display = ["lid", "customer", "product", "tier", "status", "period_end", "provider", "used_by"]
+    list_display = ["lid", "customer", "organisation", "product", "tier", "status", "period_end", "provider",
+                    "used_by"]
     list_filter = ["product", "status", "tier"]
-    search_fields = ["lid", "customer__email", "provider_subscription_id"]
+    search_fields = ["lid", "customer__email", "customer__organisation__org_id", "customer__organisation__name",
+                     "provider_subscription_id"]
     readonly_fields = ["lid", "created", "updated"]
+    autocomplete_fields = ["customer"]
+
+    @admin.display(description="organisation", ordering="customer__organisation__org_id")
+    def organisation(self, obj):
+        return obj.customer.organisation or "–"
     inlines = [CertificateInline, ActivationInline]
 
     @admin.display(description="Used by account")
@@ -129,7 +165,7 @@ class LicenseAdmin(admin.ModelAdmin):
 
     def get_fieldsets(self, request, obj=None):
         if obj is None:
-            return [(None, {"fields": ["email", "org", "tier", "status", "months"],
+            return [(None, {"fields": ["customer", "tier", "status", "months"],
                             "description": "Issues a licence with no payment. Use it to test the apps or for "
                                            "special arrangements."})]
         return super().get_fieldsets(request, obj)
