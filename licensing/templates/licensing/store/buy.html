@@ -1,0 +1,36 @@
+{% extends "licensing/store/base.html" %}
+{% block title %}Subscribe{% endblock %}
+{% block content %}
+<p><a href="{% url 'store' %}#{{ product.code }}">← All plans</a></p>
+<h1>Subscribe to {{ product.name }}</h1>
+<div class="panel">
+  <div class="summary"><b>{{ plan.tier.name }}</b><span class="price" style="font-size:22px;margin:0">US${{ plan.price }} <small>/ year</small></span></div>
+  <ul class="limits" style="margin-top:0">{% for l in plan.limits %}<li><span>{{ l.label }}</span><b>{{ l.value }}</b></li>{% endfor %}</ul>
+  {% if not plan.can_buy %}
+    <p><b>Online payments for this plan are coming soon.</b> Email <a href="mailto:{{ support }}">{{ support }}</a> to subscribe.</p>
+  {% else %}
+  <form method="post" novalidate>{% csrf_token %}
+    {% for f in form %}
+    <div class="row">{{ f.label_tag }}{{ f }}{% if f.help_text %}<div class="help">{{ f.help_text }}</div>{% endif %}{% for e in f.errors %}<div class="err">{{ e }}</div>{% endfor %}</div>
+    {% endfor %}
+    <button class="btn" type="submit">Continue to Payment</button>
+    <span class="note" style="margin-left:10px">Card details are taken by Paddle, not by us.</span>
+  </form>
+  {% if checkout %}<p class="note" id="reopen" style="margin-top:14px">Checkout didn't open? <a href="#" onclick="openCheckout();return false">Open it again</a>.</p>{% endif %}
+  {% endif %}
+</div>
+{% endblock %}
+{% block scripts %}{% if checkout %}
+<script src="https://cdn.paddle.com/paddle/v2/paddle.js"></script>
+{{ checkout|json_script:"checkout" }}
+<script>
+var co = JSON.parse(document.getElementById("checkout").textContent);
+if (co.environment === "sandbox") Paddle.Environment.set("sandbox");
+Paddle.Initialize({token: co.token});
+function openCheckout(){
+  Paddle.Checkout.open({items: co.items, customer: co.customer, customData: co.customData,
+                        settings: {successUrl: co.successUrl, displayMode: "overlay"}});
+}
+openCheckout();
+</script>
+{% endif %}{% endblock %}

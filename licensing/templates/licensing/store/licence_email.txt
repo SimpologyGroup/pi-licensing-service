@@ -1,0 +1,18 @@
+{% autoescape off %}Hello{% if customer.name %} {{ customer.name }}{% endif %},
+
+Thank you for subscribing to {{ product.name }} ({{ tier.name }}).
+
+Your licence: {{ license.lid }}{% if customer.org_id %}
+Your organisation: {{ customer.org_name }} ({{ customer.org_id }}){% endif %}
+Paid until: {{ license.period_end|date:"j F Y" }}, renewed yearly until you cancel.
+
+To start using it:
+1. Sign in to the app as an administrator.
+2. Open Subscription and click Find Licences (with this email address, {{ customer.email }}).
+3. Click Use This Licence.
+
+One licence is for one account. Paddle sends your receipt and invoice separately.
+
+Questions? Reply to this email or write to {{ support }}.
+
+{{ company }}{% endautoescape %}

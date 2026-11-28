@@ -1,6 +1,6 @@
 # PI - Licensing Service
 
-Licences for the PI apps (PI - Safety Compliance Tracker, PI-Cashflow Management, later products).
+Licences for the PI apps (Safety Compliance Insight, PI-Cashflow Management, later products).
 Owner: Johann Kruger (Simpology). Design: https://claude.ai/artifact/VJAm4jcwHu1XLs9AEoE3hL
 
 ## Stack and how to run
@@ -42,3 +42,14 @@ Owner: Johann Kruger (Simpology). Design: https://claude.ai/artifact/VJAm4jcwHu1
 
 - `SimpologyGroup/pi-licensing-service` (private). Features and data model changes go on a branch with a pull
   request for Johann to merge.
+
+## Store and Paddle
+
+- `licensing/store.py` (public pages `/store/`, `/store/<tier code>/`, `/store/thanks/`, webhook `/webhooks/paddle`)
+  and `licensing/paddle.py` (signature check, events → licences, licence email). Plans come from Product/Tier; a
+  tier is for sale only with `provider_price_id` and `PADDLE_CLIENT_TOKEN`.
+- Webhooks: `Paddle-Signature` HMAC checked with `PADDLE_WEBHOOK_SECRET` (never sent to a browser; the client-side
+  token is). Every event is stored once (`WebhookEvent`); an older event than one applied to the same
+  subscription is skipped. Licences are matched by `provider_subscription_id`, tiers by price id; revoked stays
+  revoked. Store labels for limits are in `store.LIMIT_LABELS`.
+

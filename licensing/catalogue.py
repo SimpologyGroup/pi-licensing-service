@@ -7,7 +7,7 @@ All paid tiers bill annually in USD; Tier 1 is free.
 PRODUCTS = [
     {
         "code": "pi-safety",
-        "name": "PI - Safety Compliance Tracker",
+        "name": "Safety Compliance Insight",
         "limit_names": ["org_units", "resources"],
         "tiers": [
             ("safety-t1", "Tier 1", {"org_units": 5, "resources": 10}, "0", True),

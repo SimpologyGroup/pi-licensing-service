@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.urls import path
 
-from licensing import views
+from licensing import store, views
 
 admin.site.site_header = admin.site.site_title = "PI - Licensing Service"
 
@@ -14,5 +14,9 @@ urlpatterns = [
     path("v1/licenses/<str:lid>/status", views.license_status, name="license_status"),
     path("v1/licenses/<str:lid>/certificate", views.license_certificate, name="license_certificate"),
     path("v1/activations", views.activation, name="activation"),
+    path("store/", store.index, name="store"),
+    path("store/thanks/", store.thanks, name="store_thanks"),
+    path("store/<slug:tier_code>/", store.buy, name="store_buy"),
+    path("webhooks/paddle", store.paddle_webhook, name="paddle_webhook"),
     path("admin/", admin.site.urls),
 ]

@@ -1,0 +1,32 @@
+{% extends "licensing/store/base.html" %}
+{% block title %}Plans and Pricing{% endblock %}
+{% block content %}
+<h1>Plans and Pricing</h1>
+<p class="lead">Every account starts on the free tier. Subscribe when you need more room; your data stays as it is when you
+move between tiers.</p>
+{% if not open %}<p class="note"><b>Online payments are coming soon.</b> To subscribe now, email <a href="mailto:{{ support }}">{{ support }}</a>.</p>{% endif %}
+{% for p in products %}
+<h2 id="{{ p.product.code }}">{{ p.product.name }}</h2>
+<div class="plans">
+{% for x in p.plans %}
+  <div class="card{% if x.tier.is_free %} free{% endif %}">
+    <h3>{{ x.tier.name }}</h3>
+    <p class="price">{% if x.tier.is_free %}Free{% else %}US${{ x.price }} <small>/ year</small>{% endif %}</p>
+    <ul class="limits">{% for l in x.limits %}<li><span>{{ l.label }}</span><b>{{ l.value }}</b></li>{% endfor %}</ul>
+    {% if x.tier.is_free %}<span class="note">Comes with every new account. No card needed.</span>
+    {% elif x.can_buy %}<a class="btn" href="{% url 'store_buy' x.tier.code %}">Subscribe</a>
+    {% else %}<span class="btn off">Coming Soon</span>{% endif %}
+  </div>
+{% endfor %}
+</div>
+{% empty %}<p>No plans are on sale yet.</p>
+{% endfor %}
+<h2>How It Works</h2>
+<ol class="steps">
+  <li>Choose a plan and pay by card through Paddle's secure checkout.</li>
+  <li>We email your licence to the address you gave, within a few minutes.</li>
+  <li>In the app, an administrator opens <b>Subscription</b>, clicks <b>Find Licences</b> and chooses <b>Use This Licence</b>.</li>
+</ol>
+<p class="note">One licence is for one account. The subscription renews every year until you cancel it; after a
+cancellation it runs to the end of the paid year and the account then moves back to the free tier.</p>
+{% endblock %}

@@ -6,9 +6,9 @@ from django.contrib import admin
 from django.http import HttpResponse
 from django.utils import timezone
 
-from . import services
+from . import paddle, services
 
-from .models import Activation, AppClient, Certificate, Customer, License, Organisation, Product, Tier
+from .models import Activation, AppClient, Certificate, Customer, License, Organisation, Product, Tier, WebhookEvent
 
 
 class TierInline(admin.TabularInline):
@@ -41,7 +41,7 @@ class LicenseInline(admin.TabularInline):
 @admin.register(Customer)
 class CustomerAdmin(admin.ModelAdmin):
     list_display = ["email", "name", "organisation", "created"]
-    search_fields = ["email", "name", "organisation__org_id", "organisation__name"]
+    search_fields = ["email", "name", "organisation__org_id", "organisation__name", "provider_customer_id"]
     autocomplete_fields = ["organisation"]
     inlines = [LicenseInline]
 
@@ -228,3 +228,33 @@ class AppClientAdmin(admin.ModelAdmin):
 
     def has_add_permission(self, request):
         return False
+
+
+@admin.register(WebhookEvent)
+class WebhookEventAdmin(admin.ModelAdmin):
+    """Payment notifications as received (read only). "Waiting" or "Failed" ones can be processed again."""
+
+    list_display = ["received", "event_type", "subscription_id", "processed", "result"]
+    list_filter = ["provider", "event_type", ("processed", admin.EmptyFieldListFilter)]
+    search_fields = ["event_id", "subscription_id", "result"]
+    readonly_fields = ["provider", "event_id", "event_type", "occurred_at", "subscription_id", "received",
+                       "processed", "result", "payload"]
+    actions = ["process_again"]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    @admin.action(description="Process again")
+    def process_again(self, request, queryset):
+        for event in queryset.order_by("occurred_at", "received"):
+            try:
+                result = paddle.process(event)
+            except Exception as exc:  # noqa: BLE001 - show the reason to the admin
+                result = f"Failed: {exc}"
+            self.message_user(request, f"{event.event_type} {event.event_id}: {result}")
