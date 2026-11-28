@@ -19,6 +19,10 @@ Owner: Johann Kruger (Simpology). Design: https://claude.ai/artifact/VJAm4jcwHu1
   keep it dependency-light (cryptography only, standard library for HTTP) and backwards compatible. Certificate format changes bump `SCHEMA_VERSION`
   (optional claims left out when empty, like `account`/`installation`, don't: older packages ignore them).
   Bump the package version in `package/pyproject.toml` with every change, and the apps pin a commit in requirements.
+- Proof (`licensing/proof.py`): an app key only lists or uses licences its account has proved: an email confirmed
+  with an emailed six-digit code (`EmailCode` hashed, `EmailProof` 24 h), the linked organisation (`OrgLink`, made
+  from a confirmed email of that organisation or by using one of its licences) or the certificate. Never return or
+  create anything for an unconfirmed email. The website key (no product) needs no proof.
 - One licence, one app account: `Activation` (unique per licence, app client + schema name); `services.InUse` when
   another account has it. Free licences are per account. Certificates name the account once tied.
 - Organisations (`Organisation`): `org_id` ORG-<pk, 5 digits> is set once on the first save from the primary key,

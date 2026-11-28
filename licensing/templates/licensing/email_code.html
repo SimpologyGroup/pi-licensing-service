@@ -1,0 +1,8 @@
+<!doctype html>
+<html><body style="font-family:-apple-system,Segoe UI,Arial,sans-serif;color:#1d2a35;line-height:1.5;margin:0;padding:24px">
+<p style="margin:0 0 6px">Your code:</p>
+<p style="font-size:30px;font-weight:700;letter-spacing:6px;margin:0 0 18px;color:#14324a">{{ code }}</p>
+<p>{% if requested_by %}{{ requested_by }}{% else %}Someone{% endif %} wants to use the {{ product }} licences held under this email in the account <b>{{ account_name }}</b>. Type this code on the Subscription page to confirm it is you. It works for {{ minutes }} minutes.</p>
+<p>If you did not ask for this, ignore this email: without the code nobody can see or use your licences.</p>
+<p style="color:#5b6b78;font-size:13px">{{ company }} · <a href="mailto:{{ support }}">{{ support }}</a></p>
+</body></html>

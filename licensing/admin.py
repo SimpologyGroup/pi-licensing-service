@@ -8,7 +8,8 @@ from django.utils import timezone
 
 from . import paddle, services
 
-from .models import Activation, AppClient, Certificate, Customer, License, Organisation, Product, Tier, WebhookEvent
+from .models import (Activation, AppClient, Certificate, Customer, EmailProof, License, Organisation, OrgLink, Product,
+                     Tier, WebhookEvent)
 
 
 class TierInline(admin.TabularInline):
@@ -258,3 +259,28 @@ class WebhookEventAdmin(admin.ModelAdmin):
             except Exception as exc:  # noqa: BLE001 - show the reason to the admin
                 result = f"Failed: {exc}"
             self.message_user(request, f"{event.event_type} {event.event_id}: {result}")
+
+
+@admin.register(EmailProof)
+class EmailProofAdmin(admin.ModelAdmin):
+    """Emails app accounts confirmed with a code (read only). Delete one to make the account confirm it again."""
+
+    list_display = ["email", "account_ref", "app_client", "verified_at"]
+    search_fields = ["email", "account_ref"]
+    list_filter = ["app_client"]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(OrgLink)
+class OrgLinkAdmin(admin.ModelAdmin):
+    """App accounts linked to an organisation. Delete a wrong link; add one to link an account by hand."""
+
+    list_display = ["organisation", "account_ref", "app_client", "created"]
+    search_fields = ["account_ref", "organisation__org_id", "organisation__name"]
+    list_filter = ["app_client"]
+    autocomplete_fields = ["organisation"]

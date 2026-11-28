@@ -245,3 +245,62 @@ class WebhookEvent(models.Model):
 
     def __str__(self):
         return f"{self.event_type} {self.event_id}"
+
+
+class EmailCode(models.Model):
+    """A six-digit code emailed to a licence email, so an app administrator can prove the email is theirs before
+    its licences are listed or used. Only a hash of the code is kept. A new code replaces the older ones."""
+
+    app_client = models.ForeignKey(AppClient, on_delete=models.CASCADE)
+    account_ref = models.CharField(max_length=100)
+    email = models.EmailField(db_index=True)
+    code_hash = models.CharField(max_length=64)
+    created = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    attempts = models.PositiveSmallIntegerField(default=0)
+    used = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ["-created"]
+        verbose_name = "email code"
+
+    def __str__(self):
+        return f"{self.email} for {self.account_ref}"
+
+
+class EmailProof(models.Model):
+    """An app account proved it holds an email (right code entered): for LICENSE_EMAIL_PROOF_HOURS it may list and
+    use that email's licences."""
+
+    app_client = models.ForeignKey(AppClient, on_delete=models.CASCADE)
+    account_ref = models.CharField(max_length=100)
+    email = models.EmailField()
+    verified_at = models.DateTimeField()
+
+    class Meta:
+        ordering = ["-verified_at"]
+        verbose_name = "confirmed email"
+        constraints = [models.UniqueConstraint(fields=["app_client", "account_ref", "email"],
+                                               name="one_proof_per_account_email")]
+
+    def __str__(self):
+        return f"{self.email} for {self.account_ref}"
+
+
+class OrgLink(models.Model):
+    """An app account linked to its organisation: made when the account proves an email of that organisation or
+    uses one of its licences. Only a linked account may list the organisation's licences."""
+
+    app_client = models.ForeignKey(AppClient, on_delete=models.CASCADE)
+    account_ref = models.CharField(max_length=100)
+    organisation = models.ForeignKey(Organisation, on_delete=models.PROTECT, related_name="app_links")
+    created = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["organisation", "account_ref"]
+        verbose_name = "organisation link"
+        constraints = [models.UniqueConstraint(fields=["app_client", "account_ref", "organisation"],
+                                               name="one_link_per_account_org")]
+
+    def __str__(self):
+        return f"{self.account_ref} → {self.organisation}"

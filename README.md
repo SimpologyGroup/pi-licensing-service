@@ -47,13 +47,16 @@ All calls except the public keys need `Authorization: Bearer <api key>`. App key
 | Call | Who | What |
 | --- | --- | --- |
 | `GET /.well-known/pi-license-keys` | anyone | Public keys (JWKS) for checking certificates |
-| `GET /v1/accounts/licenses?email=&product=&account=&org_id=` | app backend | Licence to use for a verified email and account (ties it to the account); free Tier 1 is issued when there is none |
-| `GET /v1/licenses?email=&product=&account=` (or `org_id=` instead of `email=`) | app backend | The email's licences (or all the organisation's licences) to pick from, each marked free to use, used by this account (`this`) or another (`other`); no certificates |
-| `GET /v1/organisations/<org_id>` | app backend | The organisation's Org ID and name, to link an app account to it |
+| `GET /v1/accounts/licenses?email=&product=&account=&org_id=` | app backend | Licence to use for a confirmed email and account (ties it to the account); free Tier 1 is issued when there is none |
+| `GET /v1/licenses?email=&product=&account=` (or `org_id=` instead of `email=`) | app backend | The email's licences (once confirmed with a code) or the linked organisation's licences, to pick from, each marked free to use, used by this account (`this`) or another (`other`); no certificates |
+| `GET /v1/organisations/<org_id>?account=` | app backend | Org ID and name of the organisation the account is linked to (404 for any other) |
+| `POST /v1/email-codes` `{email, account, account_name, requested_by}` | app backend | Email a six-digit code to a licence email (15 minutes); same answer whether or not it holds licences; `429 too_many` after 5 an hour |
+| `POST /v1/email-codes/check` `{email, account, code}` | app backend | Right code: the account may list and use that email's licences for 24 hours; `400 bad_code`, `429 too_many` after 5 wrong tries |
+| `POST /v1/org-links` `{org_id, account}` | app backend | Link the account to an organisation once it has confirmed the email of someone in it; `403 not_proven` |
 | `POST /v1/free-licenses` `{email, product, name, org, org_id, account}` | website, app | Free Tier 1 licence at sign-up; with `account`, that app account's own free licence, tied to it (an account with no licence falls back to it) |
 | `GET /v1/licenses/<lid>/status` | app backend | Status; `current` is the licence now in use |
 | `GET /v1/licenses/<lid>/certificate` | app, website | The `.pilic` file |
-| `POST /v1/activations` `{lid, account, org_id}` | app backend | Tie a licence to an app account; `409 in_use` when another account has it, `409 other_org` when it belongs to another organisation than `org_id` |
+| `POST /v1/activations` `{lid, account, org_id, certificate}` | app backend | Tie a licence to an app account (`403 not_proven` without a confirmed email, a linked organisation or the certificate); `409 in_use` when another account has it, `409 other_org` when it belongs to another organisation than `org_id` |
 
 **One licence, one account.** A licence belongs to the first app account (in one app installation, i.e. one app
 key) that links or uploads it; its certificate then names that account (`account`) and installation
@@ -81,7 +84,8 @@ cd package && ../.venv/bin/python -m unittest discover -s tests   # tests the in
 once the store has a Paddle client-side token and the tier has a Paddle price id; otherwise they show "Coming Soon".
 The buyer types email, name and organisation (or an Org ID), then pays in Paddle's checkout. Paddle tells this
 service at `/webhooks/paddle`, which makes the licence (the customer joins the given organisation or a new one) and
-emails the licence id with the steps to use it (app → Subscription → Find Licences → Use This Licence).
+emails the licence id with the steps to use it (app → Subscription → Find Licences → type the emailed code → Use
+This Licence).
 Upgrades, renewals, overdue payments and cancellations update the same licence; a cancelled one runs to the end of
 the paid year (plus the grace days), then the account is back on the free tier.
 
@@ -103,3 +107,14 @@ the **Process again** action.
 ## Not built yet
 
 A "Buy or upgrade" link from the apps' Subscription page to the store.
+
+## Proof before licences are shown
+
+An email can be guessed and Org IDs count up, so neither is proof on its own (`licensing/proof.py`). An app
+administrator types the email the licences are held under; the service emails a six-digit code to it (it names the
+account and who asked). Only a hash is kept; it works for 15 minutes and 5 tries, and a new code replaces the old
+one. With the right code that account may list and use the email's licences for 24 hours (`EmailProof`). An account
+is linked to an organisation (`OrgLink`) only after confirming the email of someone in it, or by using one of its
+licences; only then are the organisation's licences listed. Uploading a licence's certificate is proof too. The
+website's key needs no proof. Settings: `LICENSE_CODE_MINUTES`, `LICENSE_CODE_TRIES`, `LICENSE_CODES_PER_HOUR`,
+`LICENSE_EMAIL_PROOF_HOURS`; the codes go out with the email settings in `.env`.

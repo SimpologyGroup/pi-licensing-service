@@ -148,3 +148,9 @@ if EMAIL_HOST:
 else:
     EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", STORE_SUPPORT_EMAIL)
+
+# Email codes: an app administrator proves a licence email with a code before its licences are listed or used.
+LICENSE_CODE_MINUTES = int(env("LICENSE_CODE_MINUTES", "15"))
+LICENSE_CODE_TRIES = int(env("LICENSE_CODE_TRIES", "5"))  # wrong codes before a code is void
+LICENSE_CODES_PER_HOUR = int(env("LICENSE_CODES_PER_HOUR", "5"))  # per email
+LICENSE_EMAIL_PROOF_HOURS = int(env("LICENSE_EMAIL_PROOF_HOURS", "24"))
