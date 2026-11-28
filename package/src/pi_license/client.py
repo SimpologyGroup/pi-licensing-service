@@ -74,7 +74,8 @@ class LicensingClient:
             return verify(certificate, self.public_keys(refresh=True), product=self.product)
 
     def license_for_email(self, email: str, account_ref: str = "", org: str = "", org_id: str = "") -> dict:
-        """The current licence for a verified email (free Tier 1 is issued when there is none)."""
+        """The current licence for an email the account has confirmed with a code (free tier issued when there is
+        none)."""
         query = {"email": email, "product": self.product}
         if account_ref:
             query["account"] = account_ref
@@ -84,13 +85,16 @@ class LicensingClient:
             query["org_id"] = org_id
         return self._request("GET", "/v1/accounts/licenses", query=query)
 
-    def organisation(self, org_id: str) -> dict:
-        """{"org_id", "name"} of an organisation; ServiceError 404 `unknown_org` when there is none."""
-        return self._request("GET", f"/v1/organisations/{urllib.parse.quote(org_id.strip())}")["organisation"]
+    def organisation(self, org_id: str, account_ref: str = "") -> dict:
+        """{"org_id", "name"} of the organisation the account is linked to; ServiceError 404 `unknown_org` for
+        any other."""
+        return self._request("GET", f"/v1/organisations/{urllib.parse.quote(org_id.strip())}",
+                             query={"account": account_ref} if account_ref else None)["organisation"]
 
     def licenses_for_org(self, org_id: str, account_ref: str) -> list:
         """The licences of every customer in the organisation for this product, to pick one (as licenses_for_email,
-        each marked free to use, used by this account or by another)."""
+        each marked free to use, used by this account or by another). Only for the organisation the account is
+        linked to; else ServiceError 403 `org_not_linked`."""
         return self._request("GET", "/v1/licenses", query={"org_id": org_id, "product": self.product,
                                                             "account": account_ref})["licenses"]
 
@@ -105,17 +109,39 @@ class LicensingClient:
     def licenses_for_email(self, email: str, account_ref: str) -> list:
         """The licences held under an email for this product, for an administrator to pick one. Each says
         whether it is free to use, already used by this account (`"account": "this"`) or by another (`"other"`).
-        A free-tier licence is issued when the email has none this account could use."""
+        A free-tier licence is issued when the email has none this account could use. The email must be confirmed
+        first (send_code, check_code); else ServiceError 403 `not_proven`."""
         return self._request("GET", "/v1/licenses", query={"email": email, "product": self.product,
                                                             "account": account_ref})["licenses"]
 
     def status(self, lid: str) -> dict:
         return self._request("GET", f"/v1/licenses/{lid}/status")
 
-    def activate(self, lid: str, account_ref: str, org_id: str = "") -> dict:
+    def activate(self, lid: str, account_ref: str, org_id: str = "", certificate: str = "") -> dict:
         """Tie a licence to the account. With `org_id`, a licence of another organisation is refused
-        (ServiceError 409 `other_org`)."""
+        (ServiceError 409 `other_org`). The account must have proved it may use the licence: its email confirmed
+        with a code, its organisation linked, or `certificate` (the .pilic text); else ServiceError 403
+        `not_proven`."""
         body = {"lid": lid, "account": account_ref}
         if org_id:
             body["org_id"] = org_id
+        if certificate:
+            body["certificate"] = certificate
         return self._request("POST", "/v1/activations", body=body)
+
+    def send_code(self, email: str, account_ref: str, account_name: str = "", requested_by: str = "") -> dict:
+        """Email a six-digit code to `email`, to prove it before its licences are listed or used. The email names
+        the account and who asked. ServiceError 429 `too_many` when too many codes were asked for."""
+        return self._request("POST", "/v1/email-codes", body={
+            "email": email, "account": account_ref, "account_name": account_name, "requested_by": requested_by})
+
+    def check_code(self, email: str, account_ref: str, code: str) -> dict:
+        """{"confirmed": True, "until"}: the account may list and use the email's licences until then.
+        ServiceError 400 `bad_code` (wrong or expired) or 429 `too_many` (too many wrong codes)."""
+        return self._request("POST", "/v1/email-codes/check", body={
+            "email": email, "account": account_ref, "code": code})
+
+    def link_org(self, org_id: str, account_ref: str) -> dict:
+        """Link the account to an organisation and return {"org_id", "name"}. Allowed once the account has
+        confirmed the email of someone in it; else ServiceError 403 `not_proven` (404 `unknown_org`)."""
+        return self._request("POST", "/v1/org-links", body={"org_id": org_id, "account": account_ref})["organisation"]

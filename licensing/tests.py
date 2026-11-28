@@ -10,7 +10,8 @@ from django.utils import timezone
 from pi_license import LicenseError, keys, verify
 
 from . import keystore, services
-from .models import Activation, AppClient, Certificate, Customer, License, Organisation, Product, Tier
+from .models import (Activation, AppClient, Certificate, Customer, EmailProof, License, Organisation, OrgLink,
+                     Product, Tier)
 
 KEY_DIR = Path(tempfile.mkdtemp(prefix="pi-lic-keys-"))
 (KEY_DIR / "test-1.pem").write_bytes(keys.private_pem(keys.generate()))
@@ -34,11 +35,39 @@ class LicensingTestCase(TestCase):
     def public_keys(self):
         return keys.keys_from_jwks(self.client.get(reverse("public_keys")).json())
 
+    # The tests of licence rules act as an account that has confirmed its emails (proof.py); ProofTests turn it off.
+    prove = True
+
+    def _prove(self, key, account, email="", lid=""):
+        if not self.prove:
+            return
+        client = AppClient.from_key(key)
+        if client is None or client.product_id is None:
+            return
+        if lid and not email:
+            found = License.objects.filter(lid=lid).select_related("customer").first()
+            email = found.customer.email if found else ""
+        if email:
+            EmailProof.objects.update_or_create(app_client=client, account_ref=account or "",
+                                                email=services.normalise_email(email),
+                                                defaults={"verified_at": timezone.now()})
+
+    def _link(self, key, account, org_id):
+        client = AppClient.from_key(key)
+        org = services.find_organisation(org_id)
+        if self.prove and client and org:
+            OrgLink.objects.get_or_create(app_client=client, account_ref=account, organisation=org)
+
     def get(self, name, key, **kwargs):
         url = reverse(name, kwargs=kwargs.pop("url_kwargs", None))
+        self._prove(key, kwargs.get("account", ""), kwargs.get("email", ""))
+        if kwargs.get("org_id"):
+            self._link(key, kwargs.get("account", ""), kwargs["org_id"])
         return self.client.get(url, kwargs, HTTP_AUTHORIZATION=f"Bearer {key}")
 
     def post(self, name, key, body):
+        if name == "activation":
+            self._prove(key, body.get("account", ""), lid=body.get("lid", ""))
         return self.client.post(
             reverse(name), json.dumps(body), content_type="application/json", HTTP_AUTHORIZATION=f"Bearer {key}"
         )
@@ -431,7 +460,10 @@ class OneAccountPerLicenceTests(LicensingTestCase):
 
     def test_organisation_lookup(self):
         org = Organisation.objects.create(name="Acme")
-        r = self.get("organisation", self.cashflow_key, url_kwargs={"org_id": org.org_id.lower()})
+        r = self.get("organisation", self.cashflow_key, url_kwargs={"org_id": org.org_id.lower()}, account="acme")
+        self.assertEqual(r.status_code, 404)  # not linked: Org IDs count up, so names are not handed out
+        self._link(self.cashflow_key, "acme", org.org_id)
+        r = self.get("organisation", self.cashflow_key, url_kwargs={"org_id": org.org_id.lower()}, account="acme")
         self.assertEqual(r.json()["organisation"], {"org_id": org.org_id, "name": "Acme"})
         self.assertEqual(self.get("organisation", self.cashflow_key, url_kwargs={"org_id": "ORG-99999"}).status_code,
                          404)
@@ -473,3 +505,168 @@ class OneAccountPerLicenceTests(LicensingTestCase):
         self.assertEqual(self.post("activation", self.cashflow_key, {"lid": paid.lid, "account": "new"}).status_code, 201)
         data = services.describe(paid)
         self.assertEqual(verify(data["certificate"], self.public_keys(), product="pi-cashflow").account, "new")
+
+
+class ProofTests(LicensingTestCase):
+    """An app account only sees and uses licences it has proved: an email confirmed with an emailed code, the
+    organisation it is linked to, or the licence's certificate."""
+
+    prove = False
+
+    def code_for(self, email, account="acme", key=None):
+        from django.core import mail
+
+        mail.outbox.clear()
+        r = self.post("email_code", key or self.cashflow_key, {"email": email, "account": account,
+                                                                "account_name": "Acme Mining", "requested_by": "Jo"})
+        self.assertEqual(r.status_code, 202, r.content)
+        self.assertEqual(len(mail.outbox), 1)
+        message = mail.outbox[0]
+        self.assertEqual(message.to, [services.normalise_email(email)])
+        import re
+
+        return re.search(r"\b(\d{6})\b", message.subject).group(1), message
+
+    def confirm(self, email, account="acme", key=None):
+        code, _ = self.code_for(email, account, key)
+        r = self.post("email_code_check", key or self.cashflow_key, {"email": email, "account": account, "code": code})
+        self.assertEqual(r.status_code, 200, r.content)
+
+    def test_email_lookup_needs_a_code(self):
+        r = self.get("licenses_for_email", self.cashflow_key, email="guess@co.za", account="acme")
+        self.assertEqual((r.status_code, r.json()["error"]), (403, "not_proven"))
+        self.assertFalse(Customer.objects.filter(email="guess@co.za").exists())  # nothing made for a guess
+        r = self.get("account_license", self.cashflow_key, email="guess@co.za", account="acme")
+        self.assertEqual(r.status_code, 403)
+
+    def test_code_email_names_account_and_asker_and_is_stored_hashed(self):
+        code, message = self.code_for("Boss@Acme.co")
+        self.assertIn("Acme Mining", message.body)
+        self.assertIn("Jo", message.body)
+        self.assertIn("15 minutes", message.body)
+        from .models import EmailCode
+
+        self.assertNotIn(code, EmailCode.objects.get().code_hash)
+
+    def test_right_code_lists_only_this_products_licences(self):
+        cash = self.paid_license("boss@acme.co", "cashflow-t3")
+        self.paid_license("boss@acme.co", "safety-t3")
+        self.confirm("boss@acme.co")
+        r = self.get("licenses_for_email", self.cashflow_key, email="boss@acme.co", account="acme")
+        rows = r.json()["licenses"]
+        self.assertTrue(rows)
+        self.assertEqual({x["product"] for x in rows}, {"pi-cashflow"})
+        self.assertIn(cash.lid, [x["lid"] for x in rows])
+        self.assertEqual({x["email"] for x in rows}, {"boss@acme.co"})
+        # the proof is for this account and this app only
+        self.assertEqual(self.get("licenses_for_email", self.cashflow_key, email="boss@acme.co",
+                                  account="other").status_code, 403)
+        self.assertEqual(self.get("licenses_for_email", self.safety_key, email="boss@acme.co",
+                                  account="acme").status_code, 403)
+
+    def test_wrong_codes_then_locked(self):
+        code, _ = self.code_for("boss@acme.co")
+        wrong = "000000" if code != "000000" else "111111"
+        for _ in range(4):
+            r = self.post("email_code_check", self.cashflow_key, {"email": "boss@acme.co", "account": "acme",
+                                                                   "code": wrong})
+            self.assertEqual(r.json()["error"], "bad_code")
+        r = self.post("email_code_check", self.cashflow_key, {"email": "boss@acme.co", "account": "acme",
+                                                               "code": wrong})
+        self.assertEqual(r.status_code, 429)
+        r = self.post("email_code_check", self.cashflow_key, {"email": "boss@acme.co", "account": "acme",
+                                                               "code": code})
+        self.assertEqual(r.status_code, 400)  # void after too many tries: a new code is needed
+
+    def test_code_for_another_account_does_not_work(self):
+        code, _ = self.code_for("boss@acme.co", account="acme")
+        r = self.post("email_code_check", self.cashflow_key, {"email": "boss@acme.co", "account": "thief",
+                                                               "code": code})
+        self.assertEqual(r.status_code, 400)
+
+    def test_new_code_replaces_old_and_codes_expire(self):
+        old, _ = self.code_for("boss@acme.co")
+        new, _ = self.code_for("boss@acme.co")
+        if old != new:
+            r = self.post("email_code_check", self.cashflow_key, {"email": "boss@acme.co", "account": "acme",
+                                                                   "code": old})
+            self.assertEqual(r.status_code, 400)
+        from .models import EmailCode
+
+        EmailCode.objects.update(expires_at=timezone.now() - timedelta(seconds=1))
+        r = self.post("email_code_check", self.cashflow_key, {"email": "boss@acme.co", "account": "acme",
+                                                               "code": new})
+        self.assertEqual(r.status_code, 400)
+
+    @override_settings(LICENSE_CODES_PER_HOUR=2)
+    def test_too_many_codes(self):
+        self.code_for("boss@acme.co")
+        self.code_for("boss@acme.co")
+        r = self.post("email_code", self.cashflow_key, {"email": "boss@acme.co", "account": "acme"})
+        self.assertEqual((r.status_code, r.json()["error"]), (429, "too_many"))
+
+    def test_proof_runs_out(self):
+        self.confirm("boss@acme.co")
+        EmailProof.objects.update(verified_at=timezone.now() - timedelta(hours=25))
+        self.assertEqual(self.get("licenses_for_email", self.cashflow_key, email="boss@acme.co",
+                                  account="acme").status_code, 403)
+
+    def test_activation_needs_proof_or_certificate(self):
+        lic = self.paid_license("boss@acme.co", "cashflow-t3")
+        r = self.post("activation", self.cashflow_key, {"lid": lic.lid, "account": "thief"})
+        self.assertEqual((r.status_code, r.json()["error"]), (403, "not_proven"))
+        self.assertFalse(Activation.objects.exists())
+        other = self.paid_license("x@co.za", "cashflow-t3")
+        cert = services.issue_certificate(other).token
+        r = self.post("activation", self.cashflow_key, {"lid": lic.lid, "account": "thief", "certificate": cert})
+        self.assertEqual(r.status_code, 403)  # a certificate of another licence proves nothing
+        cert = services.issue_certificate(lic).token
+        r = self.post("activation", self.cashflow_key, {"lid": lic.lid, "account": "acme", "certificate": cert})
+        self.assertEqual(r.status_code, 201, r.content)
+
+    def test_activation_after_code(self):
+        lic = self.paid_license("boss@acme.co", "cashflow-t3")
+        self.confirm("boss@acme.co")
+        r = self.post("activation", self.cashflow_key, {"lid": lic.lid, "account": "acme"})
+        self.assertEqual(r.status_code, 201)
+
+    def test_org_needs_a_confirmed_email_of_it(self):
+        acme = Organisation.objects.create(name="Acme")
+        services.get_or_create_customer("boss@acme.co", org_id=acme.org_id)
+        lic = self.paid_license("finance@acme.co", "cashflow-t3")
+        lic.customer.organisation = acme
+        lic.customer.save()
+        r = self.get("licenses_for_email", self.cashflow_key, org_id=acme.org_id, account="acme")
+        self.assertEqual((r.status_code, r.json()["error"]), (403, "org_not_linked"))
+        r = self.post("org_link", self.cashflow_key, {"org_id": acme.org_id, "account": "acme"})
+        self.assertEqual((r.status_code, r.json()["error"]), (403, "not_proven"))
+        self.confirm("outsider@else.co")  # an email outside the organisation does not count
+        self.assertEqual(self.post("org_link", self.cashflow_key, {"org_id": acme.org_id,
+                                                                   "account": "acme"}).status_code, 403)
+        self.confirm("boss@acme.co")
+        r = self.post("org_link", self.cashflow_key, {"org_id": acme.org_id, "account": "acme"})
+        self.assertEqual(r.json()["organisation"]["org_id"], acme.org_id)
+        r = self.get("licenses_for_email", self.cashflow_key, org_id=acme.org_id, account="acme")
+        self.assertEqual([x["lid"] for x in r.json()["licenses"]], [lic.lid])
+        # linked: the organisation's licences may be used without confirming each email
+        self.assertEqual(self.post("activation", self.cashflow_key, {"lid": lic.lid, "account": "acme"}).status_code,
+                         201)
+
+    def test_using_an_org_licence_links_the_account(self):
+        acme = Organisation.objects.create(name="Acme")
+        services.get_or_create_customer("boss@acme.co", org_id=acme.org_id)
+        lic = self.paid_license("boss@acme.co", "cashflow-t3")
+        self.confirm("boss@acme.co")
+        self.post("activation", self.cashflow_key, {"lid": lic.lid, "account": "acme"})
+        self.assertTrue(OrgLink.objects.filter(account_ref="acme", organisation=acme).exists())
+
+    def test_free_licence_ignores_an_unlinked_org(self):
+        acme = Organisation.objects.create(name="Acme")
+        r = self.post("free_license", self.cashflow_key, {"email": "new@x.co", "account": "x", "org_id": acme.org_id})
+        self.assertEqual(r.status_code, 201)
+        self.assertIsNone(Customer.objects.get(email="new@x.co").organisation)
+
+    def test_website_key_needs_no_proof(self):
+        self.paid_license("boss@acme.co", "cashflow-t3")
+        r = self.get("account_license", self.website_key, email="boss@acme.co", product="pi-cashflow")
+        self.assertEqual(r.status_code, 200)

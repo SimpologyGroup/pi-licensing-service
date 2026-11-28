@@ -1,0 +1,7 @@
+Your code: {{ code }}
+
+{% if requested_by %}{{ requested_by }}{% else %}Someone{% endif %} wants to use the {{ product }} licences held under this email in the account "{{ account_name }}". Type this code on the Subscription page to confirm it is you. It works for {{ minutes }} minutes.
+
+If you did not ask for this, ignore this email: without the code nobody can see or use your licences.
+
+{{ company }} · {{ support }}
