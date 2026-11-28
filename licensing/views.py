@@ -8,6 +8,7 @@ organisation it is linked to, or a licence's certificate.
 """
 
 import json
+import logging
 from datetime import timedelta
 from functools import wraps
 
@@ -22,6 +23,9 @@ from django.views.decorators.http import require_GET, require_POST
 
 from . import keystore, proof, services
 from .models import AppClient, License, OrgLink
+
+
+logger = logging.getLogger(__name__)
 
 
 def error(status, code, message):
@@ -208,6 +212,7 @@ def email_code(request):
     except proof.TooMany as exc:
         return error(429, "too_many", str(exc))
     except Exception:
+        logger.exception("Email code to %s could not be sent", email)
         return error(502, "not_sent", "The code could not be emailed just now. Please try again later.")
     return JsonResponse({"sent": True, "email": email, "minutes": settings.LICENSE_CODE_MINUTES}, status=202)
 

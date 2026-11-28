@@ -207,3 +207,18 @@ class StoreTests(TestCase):
 
     def test_thanks_page(self):
         self.assertContains(self.client.get(reverse("store_thanks") + "?plan=safety-t2"), "Use This Licence")
+
+
+class EmailSettingsTests(TestCase):
+    def test_ssl_turns_tls_off(self):
+        import importlib
+        import os
+        from unittest import mock
+
+        from licensing_site import settings as site_settings
+
+        with mock.patch.dict(os.environ, {"EMAIL_HOST": "smtp.x.co", "EMAIL_PORT": "465", "EMAIL_USE_SSL": "1"}):
+            importlib.reload(site_settings)
+            self.assertTrue(site_settings.EMAIL_USE_SSL)
+            self.assertFalse(site_settings.EMAIL_USE_TLS)
+        importlib.reload(site_settings)

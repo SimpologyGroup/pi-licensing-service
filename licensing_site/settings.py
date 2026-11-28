@@ -143,8 +143,9 @@ if EMAIL_HOST:
     EMAIL_PORT = int(env("EMAIL_PORT", "587"))
     EMAIL_HOST_USER = env("EMAIL_HOST_USER", "")
     EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD", "")
-    EMAIL_USE_TLS = env_bool("EMAIL_USE_TLS", True)
     EMAIL_USE_SSL = env_bool("EMAIL_USE_SSL", False)
+    # SSL (port 465) and TLS (587) can't both be on: TLS is on by default only when SSL is off.
+    EMAIL_USE_TLS = env_bool("EMAIL_USE_TLS", not EMAIL_USE_SSL) and not EMAIL_USE_SSL
 else:
     EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", STORE_SUPPORT_EMAIL)
